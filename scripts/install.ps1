@@ -39,7 +39,10 @@ finally {
 }
 
 $UserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-if (-not (($UserPath -split ';') -contains $InstallDir)) {
+if ($env:BROK_NO_MODIFY_PATH) {
+    Write-Host "- PATH left unchanged (BROK_NO_MODIFY_PATH); add $InstallDir yourself"
+}
+elseif (-not (($UserPath -split ';') -contains $InstallDir)) {
     [Environment]::SetEnvironmentVariable('Path', "$UserPath;$InstallDir", 'User')
     $env:Path = "$env:Path;$InstallDir"
     Write-Host "- added $InstallDir to your user PATH (new terminals pick it up)"
