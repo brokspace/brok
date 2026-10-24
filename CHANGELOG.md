@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-24
+
 ### Added
 
 - `brok init`, `index`, `search`, `ask`, `run`, `status`, `setup`, `shard`,
