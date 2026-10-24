@@ -736,8 +736,6 @@ dependencies = [
 [[package]]
 name = "brok-sdk"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "332ba55314ac61d7f64e05188b179f9737afe70209956d9c802d61f7a0533cd2"
 dependencies = [
  "bytes",
  "futures-util",

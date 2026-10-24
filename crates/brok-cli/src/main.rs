@@ -130,7 +130,10 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Mcp(args) => cmd::mcp::run(&cwd, args).await,
         Command::Completions { shell } => {
             use clap::CommandFactory;
-            clap_complete::generate(shell, &mut Cli::command(), "brok", &mut std::io::stdout());
+            let mut script = Vec::new();
+            clap_complete::generate(shell, &mut Cli::command(), "brok", &mut script);
+            // A closed pipe (`brok completions bash | head`) is not an error.
+            let _ = std::io::Write::write_all(&mut std::io::stdout(), &script);
             Ok(())
         }
         Command::Shard(command) => cmd::shard::run(&cwd, command).await,
