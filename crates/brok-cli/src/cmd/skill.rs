@@ -79,7 +79,7 @@ pub async fn run(cwd: &Path, command: Command) -> Result<()> {
         }
         Command::Run { name, input, provider } => {
             let skill = catalog.require(&name)?;
-            let (client, _inbox) = daemon::connect(&workspace).await?;
+            let (client, _inbox) = daemon::connect_or_start(&workspace).await?;
             let prompt = if input.is_empty() {
                 "Apply this skill to the current workspace. Start with the first step.".to_owned()
             } else {
@@ -93,8 +93,9 @@ pub async fn run(cwd: &Path, command: Command) -> Result<()> {
                     name: skill.name.clone(),
                     instructions: skill.instructions_with_references()?,
                 }),
+                history: Vec::new(),
             };
-            super::ask::stream(&client, &request).await
+            super::ask::stream(&client, &request).await.map(drop)
         }
         Command::New { name, user_invoked, dir } => {
             let parent = dir.unwrap_or_else(|| brok_skills::workspace_skills_dir(&workspace));

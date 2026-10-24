@@ -55,7 +55,7 @@ impl Default for BrokConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WorkspaceConfig {
-    /// Index git submodules as hot partitions.
+    /// Index git submodules and nested git repositories as hot partitions.
     pub submodules: bool,
 }
 

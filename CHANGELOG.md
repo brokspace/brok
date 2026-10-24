@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-25
+
+### Added
+
+- `brok start`, `stop`, `restart` and `logs`: the daemon runs in the
+  background; `ask`, `chat`, `review`, `commit` and `skill run` start it on
+  demand and wait until the agent is ready.
+- `brok chat`: conversations with follow-up questions, `/skill`, `/clear`.
+- `brok review` (uncommitted, `--staged` or `--base <ref>`) and
+  `brok commit` (Conventional Commits message from the staged diff, then
+  commit), plus the built-in `commit-message` skill.
+- Workspaces made of several independent git repositories: nested
+  repositories become hot partitions like submodules.
+- The daemon catches up on changes made while it was stopped.
+- `brok completions <shell>`.
+- User-level defaults: the embedding model is cached once per user and the
+  LLM chosen with `brok setup llm` applies to every new workspace.
+
+### Fixed
+
+- Piping `brok ask` no longer hangs on Windows when it starts the daemon.
+
 ## [0.1.1] - 2026-10-24
 
 ### Fixed

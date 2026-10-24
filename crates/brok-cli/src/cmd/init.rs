@@ -81,8 +81,11 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
     setup_embeddings(&mut workspace, &args, &confirm).await?;
 
     section(4, "Local LLM");
+    let user_llm = brok_core::user::UserConfig::load().llm.filter(|_| !report.kept_config);
     if args.no_llm {
         ui::step("Skipped (run `brok setup llm` later)");
+    } else if let Some(llm) = user_llm {
+        use_user_llm(&mut workspace, llm).await?;
     } else {
         let llm_args = llm::Args { yes: !ask, ..llm::Args::default() };
         if let Err(e) = llm::configure(&mut workspace, &llm_args).await {
@@ -110,10 +113,31 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
     println!();
     ui::header("You're set");
     ui::hint("brok search \"how does X work\"   # find code by meaning");
-    ui::hint("brok run                         # live indexing + agent (keep it open)");
-    ui::hint("brok ask \"question\"              # answers from your local LLM");
+    ui::hint("brok ask \"question\"              # answer from your LLM (starts brok in the background)");
+    ui::hint("brok chat                         # conversation with follow-ups");
+    ui::hint("brok review   /   brok commit      # AI review of your diff, commit message from staged changes");
     ui::hint("brok skill list                  # workflows: /ask-brok, /grill-me, /to-spec, tdd...");
     ui::hint("brok doctor                      # if anything looks off");
+    Ok(())
+}
+
+/// Applies the LLM chosen earlier with `brok setup llm` (in any workspace).
+async fn use_user_llm(workspace: &mut Workspace, llm: brok_core::config::LlmConfig) -> Result<()> {
+    let mut config = workspace.config().clone();
+    config.llm = llm;
+    workspace.save_config(config)?;
+    let llm = &workspace.config().llm;
+    let Some(provider) = llm.providers.get(&llm.default) else { return Ok(()) };
+    ui::success(&format!(
+        "Using your default LLM: {} via {} (change it with `brok setup llm`)",
+        provider.model, llm.default
+    ));
+    if crate::local_llm::list_models(&provider.base_url).await.is_none() && provider.api_key_env.is_none() {
+        ui::warn(&format!(
+            "{} is not reachable at {} right now; start it before `brok ask`",
+            llm.default, provider.base_url
+        ));
+    }
     Ok(())
 }
 

@@ -40,9 +40,23 @@ enum Command {
     Index(cmd::index::Args),
     /// Hybrid (BM25 + semantic) search over the index.
     Search(cmd::search::Args),
-    /// Ask the agent a question about the workspace (needs `brok run`).
+    /// Ask a question about the workspace (starts brok in the background if needed).
     Ask(cmd::ask::Args),
-    /// Start the event bus, the index service and every enabled shard.
+    /// Chat about the workspace, with follow-up questions.
+    Chat(cmd::chat::Args),
+    /// AI code review of your changes (uncommitted, staged or a branch).
+    Review(cmd::git_assist::ReviewArgs),
+    /// Write a commit message for the staged changes, then commit.
+    Commit(cmd::git_assist::CommitArgs),
+    /// Start brok in the background (bus, live indexing, agent).
+    Start,
+    /// Stop the background brok.
+    Stop,
+    /// Restart the background brok (e.g. after changing brok.yml).
+    Restart,
+    /// Show the background brok's log.
+    Logs(cmd::service::LogsArgs),
+    /// Run brok in the foreground (bus, index service, shards); `brok start` runs it in the background.
     Run(cmd::run::Args),
     /// Show workspace, index, daemon and shard status.
     Status(cmd::status::Args),
@@ -55,6 +69,11 @@ enum Command {
     Skill(cmd::skill::Command),
     /// Serve the Brokspace tools to coding agents over MCP (stdio).
     Mcp(cmd::mcp::Args),
+    /// Print shell completions (bash, zsh, fish, powershell, elvish).
+    Completions {
+        /// Target shell.
+        shell: clap_complete::Shell,
+    },
     /// Manage shards.
     #[command(subcommand)]
     Shard(cmd::shard::Command),
@@ -96,12 +115,24 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Index(args) => cmd::index::run(&cwd, args).await,
         Command::Search(args) => cmd::search::run(&cwd, args).await,
         Command::Ask(args) => cmd::ask::run(&cwd, args).await,
+        Command::Chat(args) => cmd::chat::run(&cwd, args).await,
+        Command::Review(args) => cmd::git_assist::review(&cwd, args).await,
+        Command::Commit(args) => cmd::git_assist::commit(&cwd, args).await,
+        Command::Start => cmd::service::start(&cwd).await,
+        Command::Stop => cmd::service::stop(&cwd).await,
+        Command::Restart => cmd::service::restart(&cwd).await,
+        Command::Logs(args) => cmd::service::logs(&cwd, args).await,
         Command::Run(args) => cmd::run::run(&cwd, args).await,
         Command::Status(args) => cmd::status::run(&cwd, args).await,
         Command::Setup(args) => cmd::setup::run(&cwd, args).await,
         Command::Doctor(args) => cmd::doctor::run(&cwd, args).await,
         Command::Skill(command) => cmd::skill::run(&cwd, command).await,
         Command::Mcp(args) => cmd::mcp::run(&cwd, args).await,
+        Command::Completions { shell } => {
+            use clap::CommandFactory;
+            clap_complete::generate(shell, &mut Cli::command(), "brok", &mut std::io::stdout());
+            Ok(())
+        }
         Command::Shard(command) => cmd::shard::run(&cwd, command).await,
         Command::Model(command) => cmd::model::run(&cwd, command).await,
         Command::Bus(command) => cmd::bus::run(&cwd, command).await,

@@ -4,7 +4,8 @@
 version: 1
 
 workspace:
-  # Index git submodules (recursively) as independent "hot" partitions.
+  # Index git submodules and nested git repositories (a folder of repos) as
+  # independent "hot" partitions.
   submodules: true
 
 index:

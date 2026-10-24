@@ -87,9 +87,17 @@ impl PartitionMap {
         Self { partitions }
     }
 
-    /// Discovers submodules of the workspace (when enabled).
-    pub fn discover(root: &Path, include_submodules: bool) -> Self {
-        if include_submodules { Self::new(crate::git::submodules(root)) } else { Self::new([]) }
+    /// Discovers the workspace's git submodules and nested repositories
+    /// (when enabled): each becomes a hot partition.
+    pub fn discover(root: &Path, include_repositories: bool) -> Self {
+        if !include_repositories {
+            return Self::new([]);
+        }
+        let mut paths = crate::git::submodules(root);
+        paths.extend(crate::git::nested_repositories(root, 4));
+        paths.sort();
+        paths.dedup();
+        Self::new(paths)
     }
 
     /// The deepest partition containing `path`.

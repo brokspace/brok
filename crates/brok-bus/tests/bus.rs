@@ -106,7 +106,7 @@ async fn replies_only_reach_the_requester() {
     snoop.subscribe([p("agent:*")]).await.unwrap();
     barrier(&h).await;
 
-    let ask = AskRequest { prompt: "why?".into(), provider: None, context_chunks: None, skill: None };
+    let ask = AskRequest { prompt: "why?".into(), provider: None, context_chunks: None, skill: None, history: vec![] };
     let mut replies = cli.request(Event::from_payload(&ask).unwrap()).await.unwrap();
 
     let request = recv(&mut agent_inbox).await;
@@ -138,6 +138,7 @@ async fn system_events_reach_everyone() {
     let (_b, mut b) = h.connect(Grant::service("b", vec![], vec![])).await;
     barrier(&h).await;
 
+    assert_eq!(h.bus.stats().await.identities, vec!["a", "b"]);
     h.bus.emit(&Shutdown { reason: "test".into() }).await.unwrap();
     for inbox in [&mut a, &mut b] {
         let event = recv(inbox).await;

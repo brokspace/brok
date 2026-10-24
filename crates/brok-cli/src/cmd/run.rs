@@ -49,6 +49,10 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
     write_secret(&paths.operator_token(), operator.expose())?;
     brok_core::fsutil::write_atomic(&paths.pid_file(), std::process::id().to_string().as_bytes())?;
 
+    // Control: `brok stop` and `brok start` readiness checks.
+    let stop_requested = CancellationToken::new();
+    start_control_service(&bus, stop_requested.clone()).await;
+
     // Index service.
     let index_shutdown = CancellationToken::new();
     let mut tasks = JoinSet::new();
@@ -83,10 +87,13 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
     ui::success(&format!("brok is running for {}", workspace.root().display()));
     ui::hint(&format!("bus:    {endpoint}"));
     ui::hint(&format!("shards: {}", if started.is_empty() { "none".to_owned() } else { started.join(", ") }));
-    ui::hint("Press Ctrl+C to stop.");
+    ui::hint("Press Ctrl+C (or run `brok stop`) to stop.");
     println!();
 
-    tokio::signal::ctrl_c().await.context("waiting for Ctrl+C")?;
+    tokio::select! {
+        signal = tokio::signal::ctrl_c() => signal.context("waiting for Ctrl+C")?,
+        () = stop_requested.cancelled() => tracing::info!("stop requested over the bus"),
+    }
     println!();
     ui::step("Shutting down…");
 
@@ -104,6 +111,37 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
     let _ = std::fs::remove_file(paths.pid_file());
     ui::success("Stopped");
     Ok(())
+}
+
+/// Answers `daemon:status` and turns `daemon:stop` into a graceful shutdown.
+async fn start_control_service(bus: &Bus, stop: CancellationToken) {
+    use crate::daemon::{DaemonStatus, DaemonStatusReply, DaemonStop};
+    let pattern = |s: &str| brok_sdk::TopicPattern::new(s).expect("valid pattern");
+    let grant = Grant::service("brok-daemon", vec![pattern("daemon:*")], vec![pattern("daemon:*")]);
+    let token = bus.authenticator().issue(grant);
+    let options = ConnectOptions::new("brok-daemon", env!("CARGO_PKG_VERSION"), token.expose());
+    let (client, mut inbox) = match BrokClient::connect(bus.endpoint(), options).await {
+        Ok(connection) => connection,
+        Err(e) => {
+            ui::warn(&format!("control service unavailable (`brok stop` will not work): {e:#}"));
+            return;
+        }
+    };
+    if let Err(e) = client.subscribe([pattern("daemon:stop"), pattern("daemon:status")]).await {
+        ui::warn(&format!("control service cannot subscribe: {e:#}"));
+        return;
+    }
+    let bus = bus.clone();
+    tokio::spawn(async move {
+        while let Some(event) = inbox.recv().await {
+            if event.is::<DaemonStop>() {
+                stop.cancel();
+            } else if event.is::<DaemonStatus>() {
+                let reply = DaemonStatusReply { pid: std::process::id(), identities: bus.stats().await.identities };
+                let _ = client.reply(&event, &reply).await;
+            }
+        }
+    });
 }
 
 /// Opens the index for writing (falling back to read-only search when the

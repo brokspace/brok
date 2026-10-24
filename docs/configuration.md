@@ -12,7 +12,7 @@ triggers a rebuild of the affected partitions on the next `brok index`.
 
 | Key | Default | Description |
 |---|---|---|
-| `submodules` | `true` | Index initialized git submodules (recursively) as independent *hot* partitions. |
+| `submodules` | `true` | Index git submodules and git repositories nested in the workspace (up to 4 levels, e.g. a folder of repos) as independent *hot* partitions. |
 
 ## `index`
 
@@ -35,8 +35,18 @@ triggers a rebuild of the affected partitions on the next `brok index`.
 | `device` | `auto` | `auto`, `cpu`, `cuda`, `coreml`, `directml` (GPU devices need the matching build feature). |
 | `batch_size` | `16` | Texts per inference batch. |
 
-Model files live in `.brokspace/cache/models/`. Set `BROK_MODELS_DIR` to
-share one copy between workspaces.
+Model files are downloaded once per user and shared by every workspace:
+`~/.cache/brokspace/models` (Linux), `~/Library/Caches/brokspace/models`
+(macOS), `%LOCALAPPDATA%\brokspace\models` (Windows). Set `BROK_MODELS_DIR`
+to use another directory. A copy inside `.brokspace/cache/models/` (from
+older versions) keeps working.
+
+## User defaults
+
+`brok setup llm` also stores your LLM choice in the user configuration
+(`~/.config/brokspace/config.yml`, `~/Library/Application Support/brokspace/`
+or `%APPDATA%\brokspace\`; override with `BROK_CONFIG_DIR`). `brok init`
+applies it to every new workspace, so you choose a model once per machine.
 
 ## `search`
 
@@ -103,5 +113,6 @@ Each shard documents its own `settings`. For `brok-agent` see its
 |---|---|---|
 | `RUST_LOG` | all | Log filter, e.g. `RUST_LOG=brok_index=debug`. |
 | `NO_COLOR` | CLI | Disable colors. |
-| `BROK_MODELS_DIR` | CLI | Shared embedding model cache. |
+| `BROK_MODELS_DIR` | CLI | Embedding model cache (default: the OS cache directory). |
+| `BROK_CONFIG_DIR` | CLI | User defaults directory (default: the OS config directory). |
 | `BROK_*` (others) | shards | Set by `brok run` for shard processes; reserved. |

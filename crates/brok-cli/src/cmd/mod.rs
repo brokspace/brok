@@ -2,13 +2,16 @@
 
 pub mod ask;
 pub mod bus;
+pub mod chat;
 pub mod doctor;
+pub mod git_assist;
 pub mod index;
 pub mod init;
 pub mod mcp;
 pub mod model;
 pub mod run;
 pub mod search;
+pub mod service;
 pub mod setup;
 pub mod shard;
 pub mod skill;

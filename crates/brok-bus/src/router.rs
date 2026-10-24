@@ -35,10 +35,12 @@ pub(crate) enum Command {
 }
 
 /// Runtime counters.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BusStats {
     /// Open sessions.
     pub connections: usize,
+    /// Identities of the open sessions, sorted.
+    pub identities: Vec<String>,
     /// Events accepted for routing.
     pub published: u64,
     /// Event deliveries to clients.
@@ -139,7 +141,9 @@ impl Router {
                 self.deliver(None, event);
             }
             Command::Stats { reply } => {
-                let _ = reply.send(BusStats { connections: self.connections.len(), ..self.stats });
+                let mut identities: Vec<String> = self.connections.values().map(|c| c.grant.identity.clone()).collect();
+                identities.sort();
+                let _ = reply.send(BusStats { connections: self.connections.len(), identities, ..self.stats.clone() });
             }
         }
     }

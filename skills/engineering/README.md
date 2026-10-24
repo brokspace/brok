@@ -16,6 +16,7 @@ Daily code work. Promoted: embedded in the `brok` binary and exported by
 
 ## Model-invoked
 
+- **[commit-message](commit-message/SKILL.md)**: A Conventional Commits message for a staged change (used by `brok commit`).
 - **[brok-context](brok-context/SKILL.md)**: Explore a codebase through the Brokspace index (`brok search`, `brok_search`) before reading files blindly.
 - **[tdd](tdd/SKILL.md)**: Test-driven development with a red-green loop, one vertical slice at a time, at agreed seams.
 - **[diagnosing-bugs](diagnosing-bugs/SKILL.md)**: Make the bug red, minimise, hypothesise, instrument, fix, and prove the fix with a regression test.

@@ -17,7 +17,7 @@ use futures::StreamExt;
 use tokio::io::AsyncWriteExt;
 
 /// Environment variable overriding the model cache directory.
-pub const MODELS_DIR_ENV: &str = "BROK_MODELS_DIR";
+pub use brok_core::user::MODELS_DIR_ENV;
 
 const NOMIC_ID: &str = "nomic-embed-text-v1.5";
 const NOMIC_BASE_URL: &str = "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5/resolve/main";
@@ -55,13 +55,19 @@ pub struct ModelFiles {
 }
 
 impl ModelFiles {
-    /// Where the configured model lives, honoring [`MODELS_DIR_ENV`].
+    /// Where the configured model lives: a copy already inside the workspace
+    /// (older installs) wins, otherwise the per-user cache shared by every
+    /// workspace ([`MODELS_DIR_ENV`] or the OS cache directory).
     pub fn locate(workspace_models_dir: &Path, config: &EmbeddingsConfig) -> Result<Self> {
         if config.model != NOMIC_ID {
             bail!("unsupported embedding model `{}` (supported: {NOMIC_ID})", config.model);
         }
-        let base = std::env::var_os(MODELS_DIR_ENV).map_or_else(|| workspace_models_dir.to_path_buf(), PathBuf::from);
-        let dir = base.join(NOMIC_ID);
+        let local = workspace_models_dir.join(NOMIC_ID);
+        let dir = if std::env::var_os(MODELS_DIR_ENV).is_none() && local.join("tokenizer.json").is_file() {
+            local
+        } else {
+            brok_core::user::models_dir().unwrap_or_else(|| workspace_models_dir.to_path_buf()).join(NOMIC_ID)
+        };
         let onnx_name = match config.variant {
             ModelVariant::Quantized => "model_quantized.onnx",
             ModelVariant::Full => "model.onnx",

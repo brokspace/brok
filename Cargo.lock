@@ -634,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "brok-bus"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "brok-sdk",
  "futures",
@@ -651,7 +651,7 @@ dependencies = [
 
 [[package]]
 name = "brok-cli"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "brok-bus",
@@ -661,6 +661,7 @@ dependencies = [
  "brok-shard",
  "brok-skills",
  "clap",
+ "clap_complete",
  "console",
  "dialoguer",
  "embed-manifest",
@@ -675,13 +676,15 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "brok-core"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "brok-sdk",
+ "dirs",
  "serde",
  "serde_json",
  "serde_yaml_ng",
@@ -692,7 +695,7 @@ dependencies = [
 
 [[package]]
 name = "brok-index"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arrow-array",
@@ -732,7 +735,7 @@ dependencies = [
 
 [[package]]
 name = "brok-sdk"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytes",
  "futures-util",
@@ -748,7 +751,7 @@ dependencies = [
 
 [[package]]
 name = "brok-shard"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "brok-core",
@@ -769,7 +772,7 @@ dependencies = [
 
 [[package]]
 name = "brok-skills"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "brok-core",
@@ -965,6 +968,15 @@ dependencies = [
  "clap_lex",
  "strsim",
  "terminal_size",
+]
+
+[[package]]
+name = "clap_complete"
+version = "4.6.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "037e2a1a92236d0aff7e845093f64661d6df4c02c9fcc61a60e9e1d736fa392f"
+dependencies = [
+ "clap",
 ]
 
 [[package]]

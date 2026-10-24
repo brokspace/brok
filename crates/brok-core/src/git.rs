@@ -65,6 +65,38 @@ fn parse_submodule_status(output: &str) -> Vec<String> {
     paths
 }
 
+/// Directories never searched for nested repositories.
+const SKIP_DIRS: &[&str] = &[".git", ".brokspace", "node_modules", "target", "dist", "build", "vendor"];
+
+/// Independent git repositories nested in the workspace (directories below
+/// `root` holding a `.git` directory or file), up to `max_depth` levels deep.
+/// Covers "a folder of repositories" workspaces; submodules show up too and
+/// are deduplicated by the caller. Hidden directories are skipped.
+pub fn nested_repositories(root: &Path, max_depth: usize) -> Vec<String> {
+    fn visit(root: &Path, dir: &Path, depth: usize, max_depth: usize, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !path.is_dir() || name.starts_with('.') || SKIP_DIRS.contains(&name.as_str()) {
+                continue;
+            }
+            if path.join(".git").exists()
+                && let Some(rel) = crate::fsutil::to_workspace_relative(root, &path)
+            {
+                out.push(rel);
+            }
+            if depth < max_depth {
+                visit(root, &path, depth + 1, max_depth, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    visit(root, root, 1, max_depth, &mut out);
+    out.sort();
+    out
+}
+
 /// Runs `git lfs track <pattern>` in `root`.
 pub fn lfs_track(root: &Path, pattern: &str) -> Result<()> {
     run(root, &["lfs", "install", "--local"])?;
@@ -74,6 +106,18 @@ pub fn lfs_track(root: &Path, pattern: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_nested_repositories() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for repo in ["api", "libs/ui", "libs/ui/vendor-x", "node_modules/pkg", ".hidden/repo", "a/b/c/d/e/deep"] {
+            std::fs::create_dir_all(root.join(repo).join(".git")).unwrap();
+        }
+        std::fs::create_dir_all(root.join("web")).unwrap();
+        std::fs::write(root.join("web/.git"), "gitdir: ../.git/modules/web").unwrap(); // submodule style
+        assert_eq!(nested_repositories(root, 4), vec!["api", "libs/ui", "libs/ui/vendor-x", "web"]);
+    }
 
     #[test]
     fn parses_status_lines() {

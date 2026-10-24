@@ -9,6 +9,7 @@ pub mod fsutil;
 pub mod git;
 pub mod init;
 pub mod partition;
+pub mod user;
 pub mod workspace;
 
 pub use config::BrokConfig;

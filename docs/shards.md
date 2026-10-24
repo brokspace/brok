@@ -15,7 +15,7 @@ brok shard new my-shard                  # project from brok-shard-template
 brok shard new my-skills --skills-only   # a skill shard: shard.json + skills/
 brok shard install ./my-shard            # local directory (development)
 brok shard install https://github.com/acme/brok-license-check --tag v1.0.0
-brok run                                 # starts every enabled shard
+brok start                               # starts every enabled shard (or `brok restart`)
 brok bus tail 'license:*'                # watch what it publishes
 brok shard remove brok-license-check
 ```

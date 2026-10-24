@@ -39,6 +39,9 @@ pub async fn serve(index: Index, writable: bool, client: BrokClient, mut inbox: 
         tracing::error!(error = %e, "index service cannot subscribe");
         return;
     }
+    if writable {
+        catch_up(&index, &client).await;
+    }
 
     let mut changed = BTreeSet::new();
     let mut deleted = BTreeSet::new();
@@ -88,6 +91,27 @@ pub async fn serve(index: Index, writable: bool, client: BrokClient, mut inbox: 
                 }
             }
         }
+    }
+}
+
+/// Indexes whatever changed while no daemon was running (pulls, checkouts,
+/// edits). Incremental, so it is quick when nothing changed. Searches wait
+/// for it to finish.
+async fn catch_up(index: &RwLock<Index>, client: &BrokClient) {
+    let result = index.write().await.index_all(false, &|_| {}).await;
+    match result {
+        Ok(report) => {
+            if report.files_indexed + report.files_removed > 0 {
+                tracing::info!(
+                    indexed = report.files_indexed,
+                    removed = report.files_removed,
+                    ms = report.duration.as_millis(),
+                    "index caught up"
+                );
+                let _ = client.emit(&IndexUpdated::from(&report)).await;
+            }
+        }
+        Err(e) => tracing::error!(error = %e, "catching up the index failed"),
     }
 }
 

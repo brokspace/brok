@@ -14,7 +14,7 @@ $ brok init
 [3/6] Semantic search  ✓ Embedding model ready
 [4/6] Local LLM        ✓ Found Ollama with 3 model(s): brok ask will use qwen2.5-coder:7b
 [5/6] Index            ✓ Indexed 1 284 files (9 912 chunks)
-[6/6] Coding agents    ✓ Claude Code: MCP server registered in .mcp.json, 19 skills in .claude/skills
+[6/6] Coding agents    ✓ Claude Code: MCP server registered in .mcp.json, 20 skills in .claude/skills
 
 $ brok search "where do we validate jwt tokens"
 0.97 services/auth/src/jwt.rs:42-77 function validate_token
@@ -70,17 +70,32 @@ Intel (text search only: ONNX Runtime has no Intel Mac build). Prefer Cargo?
 ## Quick start
 
 ```sh
-cd your-project
+cd your-project              # one repo, or a folder holding many repos
 brok init                    # guided setup, ~1 minute plus downloads
 brok search "how does X work"
-brok run                     # keep open: live re-indexing + agent
-brok ask "how is a refresh token rotated?"
+brok ask "how is a refresh token rotated?"   # starts brok in the background
 ```
 
 Then, in your coding agent: `/ask-brok` to pick a workflow, `/grill-me`
 before a big change, or just ask it to "use brok_search".
 
 `brok doctor` checks everything and tells you how to fix what is missing.
+
+## A day with brok
+
+```sh
+brok start                       # once a day (or let `brok ask` start it): live indexing in the background
+brok chat                        # think through a change with follow-up questions
+brok review                      # AI review of your uncommitted changes (or --staged, --base main)
+git add -p && brok commit        # Conventional Commits message from the staged diff, then commit
+brok skill run tdd "add retry to the http client"
+brok stop                        # when you are done
+```
+
+The index follows you: edits, commits, pulls and branch switches are picked
+up within seconds, and `brok start` catches up on anything that changed
+while it was off. The embedding model and your LLM choice are shared by all
+your workspaces, so `brok init` in the next project takes seconds.
 
 ## Everyday commands
 
@@ -89,14 +104,18 @@ before a big change, or just ask it to "use brok_search".
 | `brok init [--yes]` | Guided setup: workspace, agent, search model, local LLM, index, coding agents |
 | `brok search <query> [-n N] [--json]` | Hybrid search (semantic + keywords) |
 | `brok ask <question> [-p provider]` | Answer from your LLM, grounded in your code, with sources |
-| `brok run` | Event bus + live indexing + shards (the agent) |
+| `brok chat [--skill name]` | Conversation with follow-ups (`/skill`, `/clear`, `/exit`) |
+| `brok review [--staged \| --base main]` | Code review of your changes with the `code-review` skill |
+| `brok commit [--yes \| --print]` | Commit message for the staged changes, then commit |
+| `brok start` / `stop` / `restart` / `logs -f` | The background daemon (bus, live indexing, agent) |
 | `brok status` / `brok doctor` | What is indexed and running / health check with fixes |
-| `brok index [--rebuild]` | Re-index (incremental; `brok run` does it automatically) |
+| `brok index [--rebuild]` | Re-index (incremental; the daemon does it automatically) |
 | `brok setup llm \| agents \| sync` | Local LLM, coding agent integrations, index mirroring |
 | `brok skill list \| show \| run \| new \| export` | Agent skills |
 | `brok shard new \| install \| list \| info \| remove` | Shards |
 | `brok mcp` | MCP server for coding agents (started by them) |
-| `brok bus tail \| emit` | Watch and inject events (shard development) |
+| `brok completions <shell>` | Shell completions (bash, zsh, fish, powershell) |
+| `brok run` / `brok bus tail \| emit` | Foreground daemon / watch and inject events (shard development) |
 | `brok model download \| status` | Embedding model |
 
 ## Guides

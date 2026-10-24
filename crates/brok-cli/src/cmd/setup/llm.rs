@@ -179,6 +179,15 @@ fn save(workspace: &mut Workspace, provider: &str, base_url: Option<&str>, model
         entry.model = model.to_owned();
     }
     config.llm.default = provider.to_owned();
+    let llm = config.llm.clone();
     workspace.save_config(config)?;
+
+    // Remember the choice for every future `brok init`.
+    let mut user = brok_core::user::UserConfig::load();
+    user.llm = Some(llm);
+    match user.save() {
+        Ok(path) => tracing::debug!(path = %path.display(), "saved user LLM defaults"),
+        Err(e) => tracing::warn!(error = %e, "cannot save user LLM defaults"),
+    }
     Ok(())
 }
