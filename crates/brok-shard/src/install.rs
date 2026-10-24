@@ -92,6 +92,12 @@ pub struct InstallOutcome {
     pub method: InstallMethod,
 }
 
+/// Short random directory name: staging paths must stay well under Windows'
+/// path length limit even in deep workspaces.
+fn staging_id() -> String {
+    uuid::Uuid::new_v4().simple().to_string()[..8].to_owned()
+}
+
 /// Deletes the staging directory on every exit path.
 struct Staging(PathBuf);
 
@@ -109,7 +115,7 @@ pub async fn install(
     consent: &dyn Consent,
     log: &(dyn Fn(&str) + Sync),
 ) -> Result<InstallOutcome> {
-    let staging = Staging(registry.staging_dir().join(uuid::Uuid::new_v4().simple().to_string()));
+    let staging = Staging(registry.staging_dir().join(staging_id()));
     std::fs::create_dir_all(&staging.0).with_context(|| format!("creating {}", staging.0.display()))?;
 
     let (src, provenance) = match &source {
@@ -241,7 +247,7 @@ fn content_hash(dir: &Path) -> Result<String> {
 /// `brok init` for the bundled system agent).
 pub fn install_builtin(registry: &Registry, manifest: ShardManifest, binary: &Path) -> Result<InstalledShard> {
     manifest.validate()?;
-    let staging = Staging(registry.staging_dir().join(uuid::Uuid::new_v4().simple().to_string()));
+    let staging = Staging(registry.staging_dir().join(staging_id()));
     let prepared = staging.0.join("install");
     let executable = manifest.entrypoint_path(&prepared).context("a builtin shard must have an entrypoint")?;
     std::fs::create_dir_all(executable.parent().unwrap_or(&prepared))?;
@@ -285,7 +291,8 @@ fn validate_git_url(url: &str) -> Result<()> {
 
 async fn clone(url: &str, tag: Option<&str>, into: &Path) -> Result<()> {
     let mut command = tokio::process::Command::new("git");
-    command.args(["clone", "--depth", "1", "--quiet"]);
+    // Deep workspaces exceed Windows' 260 character limit inside .git.
+    command.args(["-c", "core.longpaths=true", "clone", "--depth", "1", "--quiet"]);
     if let Some(tag) = tag {
         ensure!(!tag.starts_with('-'), "invalid tag `{tag}`");
         command.args(["--branch", tag]);

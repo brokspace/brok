@@ -100,6 +100,9 @@ pub async fn run(cwd: &Path, command: Command) -> Result<()> {
                 InstallMethod::SkillsOnly => "skills",
             };
             match outcome.replaced {
+                Some(old) if old == manifest.version => {
+                    ui::success(&format!("Reinstalled {} {old} ({how})", manifest.name))
+                }
                 Some(old) => ui::success(&format!("Upgraded {} {old} → {} ({how})", manifest.name, manifest.version)),
                 None => ui::success(&format!("Installed {} {} ({how})", manifest.name, manifest.version)),
             }
