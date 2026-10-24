@@ -128,11 +128,21 @@ Handy while developing shards: `brok run -v` in one terminal and
 
 ## Releasing (maintainers)
 
-1. Release `brok-sdk` first (`cargo publish`) if it changed.
-2. Update `CHANGELOG.md`, bump `version` in `Cargo.toml`, tag `vX.Y.Z`.
-3. The release workflow builds binaries for all platforms and attaches them
-   with `.sha256` files; then `cargo publish` the crates in dependency order:
-   `brok-core`, `brok-bus`, `brok-index`, `brok-shard`, `brok-cli`.
+1. If `brok-sdk` changed: bump its version, tag `vX.Y.Z` in brok-sdk; its
+   Release workflow publishes it to crates.io.
+2. Update `CHANGELOG.md`, bump `version` in `Cargo.toml` (workspace and the
+   internal dependency versions), push, wait for green CI, then tag
+   `vX.Y.Z`. The Release workflow builds binaries for Linux, macOS and
+   Windows, attaches them with `.sha256` files and publishes the release
+   (the install scripts always fetch the latest one).
+3. Publish the crates: `gh workflow run publish-crates.yml -f tag=vX.Y.Z`
+   (vendors the built-in skills into `brok-skills`, then publishes every
+   crate in dependency order).
+4. For brok-agent, after its release: `gh workflow run publish-crate.yml
+   -f tag=vX.Y.Z`, then pin the new binaries in its `shard.json`
+   `releases` (the Release workflow prints the block in its summary).
+
+All publishing uses the `CARGO_REGISTRY_TOKEN` organization secret.
 
 ## Code of conduct
 
