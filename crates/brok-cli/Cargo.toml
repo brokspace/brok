@@ -47,6 +47,9 @@ tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
+[build-dependencies]
+embed-manifest = "1.4"
+
 [dev-dependencies]
 tempfile.workspace = true
 

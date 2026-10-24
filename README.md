@@ -53,6 +53,14 @@ curl -fsSL https://raw.githubusercontent.com/brokspace/brok/main/scripts/install
 irm https://raw.githubusercontent.com/brokspace/brok/main/scripts/install.ps1 | iex
 ```
 
+Managed (corporate) Windows machines often block downloaded scripts. Then
+install by hand: download `brok-windows-x86_64.exe` and
+`brok-agent-windows-x86_64.exe` from the
+[latest release](https://github.com/brokspace/brok/releases/latest) and the
+[agent release](https://github.com/brokspace/brok-agent/releases/latest),
+check them against the `.sha256` files, rename them to `brok.exe` and
+`brok-agent.exe`, and put both in one folder on your `PATH`.
+
 Both install `brok` and `brok-agent` (checksums verified). Prebuilt
 binaries: Linux x86_64/arm64, macOS Apple Silicon, Windows x86_64, and macOS
 Intel (text search only: ONNX Runtime has no Intel Mac build). Prefer Cargo?

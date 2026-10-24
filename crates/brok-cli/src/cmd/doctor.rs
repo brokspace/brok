@@ -85,6 +85,17 @@ async fn check_workspace(workspace: &Workspace, report: &mut Report) {
     let config = workspace.config();
     report.line(Status::Ok, "workspace", &workspace.root().display().to_string(), None);
 
+    // Index files sit ~110 characters below the workspace root.
+    let deepest = workspace.root().as_os_str().len() + 110;
+    if cfg!(windows) && deepest > 255 && !windows_long_paths_enabled() {
+        report.line(
+            Status::Warn,
+            "paths",
+            "the workspace path is long and Windows long paths are disabled",
+            Some(r"enable them (admin PowerShell: Set-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem LongPathsEnabled 1) or use a shorter path"),
+        );
+    }
+
     let index_status = match Index::open(workspace, None, Access::ReadOnly).await {
         Ok(index) => index.status().await,
         Err(e) => Err(e),
@@ -194,4 +205,12 @@ async fn check_workspace(workspace: &Workspace, report: &mut Report) {
             _ => {}
         }
     }
+}
+
+/// Whether Windows allows paths longer than 260 characters.
+fn windows_long_paths_enabled() -> bool {
+    std::process::Command::new("reg")
+        .args(["query", r"HKLM\SYSTEM\CurrentControlSet\Control\FileSystem", "/v", "LongPathsEnabled"])
+        .output()
+        .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).contains("0x1"))
 }

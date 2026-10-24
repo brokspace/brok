@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-24
+
+### Fixed
+
+- Windows: `brok.exe` declares long path awareness, so LanceDB writes work in
+  deep workspaces when long paths are enabled; `brok doctor` explains how to
+  enable them.
+
+### Documentation
+
+- Manual install steps for Windows machines whose antivirus blocks the
+  install script.
+
 ## [0.1.0] - 2026-10-24
 
 ### Added

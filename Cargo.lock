@@ -634,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "brok-bus"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "brok-sdk",
  "futures",
@@ -651,7 +651,7 @@ dependencies = [
 
 [[package]]
 name = "brok-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "brok-bus",
@@ -663,6 +663,7 @@ dependencies = [
  "clap",
  "console",
  "dialoguer",
+ "embed-manifest",
  "indicatif",
  "reqwest 0.13.5",
  "semver",
@@ -678,7 +679,7 @@ dependencies = [
 
 [[package]]
 name = "brok-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "brok-sdk",
  "serde",
@@ -691,7 +692,7 @@ dependencies = [
 
 [[package]]
 name = "brok-index"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arrow-array",
@@ -747,7 +748,7 @@ dependencies = [
 
 [[package]]
 name = "brok-shard"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "brok-core",
@@ -768,7 +769,7 @@ dependencies = [
 
 [[package]]
 name = "brok-skills"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "brok-core",
@@ -2139,6 +2140,12 @@ name = "either"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
+
+[[package]]
+name = "embed-manifest"
+version = "1.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba92c8f4591bf29f89716b45e5f5f56577adbb81426e5620c6e994da7c88bb7a"
 
 [[package]]
 name = "embedded-io"
