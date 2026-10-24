@@ -85,7 +85,7 @@ jobs:
           mkdir -p .cargo
           echo '[patch.crates-io]' > .cargo/config.toml
           echo 'brok-sdk = { path = "brok-sdk" }' >> .cargo/config.toml
-      - uses: dtolnay/rust-toolchain@1.89
+      - uses: dtolnay/rust-toolchain@1.120
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: brok
