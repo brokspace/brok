@@ -27,10 +27,10 @@ jobs:
     steps:
       # Same layout as local polyrepo development (see scripts/bootstrap.sh):
       # this repository and brok-sdk side by side, crates.io brok-sdk patched.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: brok
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: brokspace/brok-sdk
           path: brok-sdk
@@ -73,10 +73,10 @@ jobs:
     name: MSRV (1.89, lean)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: brok
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: brokspace/brok-sdk
           path: brok-sdk
