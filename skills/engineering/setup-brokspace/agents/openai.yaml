@@ -1,0 +1,5 @@
+interface:
+  display_name: "Setup Brokspace"
+  short_description: "Configure this repo for the Brokspace skills"
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Brokspace Context"
+  short_description: "Explore code through the Brokspace index"

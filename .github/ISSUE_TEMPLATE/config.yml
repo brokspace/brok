@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and help
+    url: https://github.com/brokspace/brok/discussions/categories/q-a
+    about: How do I...? Ask in Discussions (include the output of `brok doctor`).
+  - name: Ideas to discuss first
+    url: https://github.com/brokspace/brok/discussions/categories/ideas
+    about: Not sure it fits SCOPE.md yet? Start a discussion.
+  - name: Security vulnerability
+    url: https://github.com/brokspace/brok/security/advisories/new
+    about: Report security issues privately, never in a public issue.

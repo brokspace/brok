@@ -1,0 +1,3 @@
+interface:
+  display_name: "Write a Shard"
+  short_description: "Build a Brokspace shard with brok-sdk"

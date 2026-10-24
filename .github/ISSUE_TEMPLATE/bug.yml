@@ -1,0 +1,57 @@
+name: Bug
+description: brok did the wrong thing in a real session.
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! The fastest way to a fix is a report we can reproduce.
+        Problems with a specific shard belong in that shard's repository; the default agent lives in [brokspace/brok-agent](https://github.com/brokspace/brok-agent/issues).
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - CLI / setup (init, doctor, setup)
+        - Index / search
+        - Event bus / brok run
+        - Shards (install, supervisor)
+        - Skills (list, run, export)
+        - Integrations (MCP, coding agents, local LLM)
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `brok doctor`
+      description: Version, OS, compiled backends and workspace health in one go. Remove anything sensitive.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: What you ran
+      description: The exact command(s), and the output. Re-running with `-v` adds useful detail.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: And, if you know it, the doc or README line that says so.
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant part of .brokspace/brok.yml (optional)
+      render: yaml

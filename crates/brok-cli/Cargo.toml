@@ -1,0 +1,54 @@
+[package]
+name = "brok-cli"
+description = "Brokspace: local-first knowledge index and event-driven agents for your workspace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "../../README.md"
+keywords = ["rag", "code-search", "agents", "embeddings", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "brok"
+path = "src/main.rs"
+
+[features]
+default = ["ast", "lancedb", "onnx"]
+ast = ["brok-index/ast"]
+lancedb = ["brok-index/lancedb"]
+onnx = ["brok-index/onnx"]
+cuda = ["brok-index/cuda"]
+coreml = ["brok-index/coreml"]
+directml = ["brok-index/directml"]
+
+[dependencies]
+brok-bus.workspace = true
+brok-core.workspace = true
+brok-index.workspace = true
+brok-sdk.workspace = true
+brok-shard.workspace = true
+brok-skills.workspace = true
+
+anyhow.workspace = true
+clap.workspace = true
+console.workspace = true
+dialoguer.workspace = true
+indicatif.workspace = true
+reqwest.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sysinfo.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

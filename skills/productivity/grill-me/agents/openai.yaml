@@ -1,0 +1,5 @@
+interface:
+  display_name: "Grill Me"
+  short_description: "Get interviewed until the plan is clear"
+policy:
+  allow_implicit_invocation: false

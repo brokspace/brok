@@ -1,0 +1,5 @@
+interface:
+  display_name: "Ask Brok"
+  short_description: "Route to the right Brokspace skill or command"
+policy:
+  allow_implicit_invocation: false

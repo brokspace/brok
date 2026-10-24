@@ -1,0 +1,39 @@
+name: Idea or feedback
+description: A change to Brokspace, grounded in a problem you actually hit.
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Brokspace is kept deliberately small: simple, local-first, zero configuration, with domain-specific behaviour living in **shards** and **integrations** instead of the core.
+        An idea stays open when it clears both parts of the bar in [`SCOPE.md`](https://github.com/brokspace/brok/blob/main/SCOPE.md):
+
+        1. **Observed problem**: something that got in your way in real use, not a hypothetical improvement.
+        2. **Fits the philosophy**: it is not already decided in [`.out-of-scope/`](https://github.com/brokspace/brok/tree/main/.out-of-scope), and it could not live in a shard or skill instead.
+
+        Open-ended questions are welcome in [Discussions](https://github.com/brokspace/brok/discussions).
+  - type: checkboxes
+    id: read-scope
+    attributes:
+      label: Before filing
+      options:
+        - label: I've read `SCOPE.md` and checked `.out-of-scope/`, and this is not covered by either.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What got in your way
+      description: The real situation. What you were trying to do, what you ran, and why the current behaviour was a problem.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: As concretely as you can. Could it be a shard, a skill or an integration instead of a core change?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds you tried (optional)

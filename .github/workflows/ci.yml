@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: ${{ matrix.os }} (${{ matrix.features }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        features: [default, lean]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # Same layout as local polyrepo development (see scripts/bootstrap.sh):
+      # this repository and brok-sdk side by side, crates.io brok-sdk patched.
+      - uses: actions/checkout@v4
+        with:
+          path: brok
+      - uses: actions/checkout@v4
+        with:
+          repository: brokspace/brok-sdk
+          path: brok-sdk
+      - name: Use the brok-sdk checkout
+        shell: bash
+        run: |
+          mkdir -p .cargo
+          echo '[patch.crates-io]' > .cargo/config.toml
+          echo 'brok-sdk = { path = "brok-sdk" }' >> .cargo/config.toml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Install protoc
+        if: matrix.features == 'default'
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: brok
+          key: ${{ matrix.features }}
+      - name: Format
+        if: matrix.os == 'ubuntu-latest' && matrix.features == 'default'
+        working-directory: brok
+        run: cargo fmt --all --check
+      - name: Select features
+        shell: bash
+        run: |
+          if [ "${{ matrix.features }}" = "lean" ]; then echo "FEATURES=--no-default-features" >> "$GITHUB_ENV"; fi
+      - name: Clippy
+        working-directory: brok
+        shell: bash
+        run: cargo clippy --workspace --all-targets $FEATURES -- -D warnings
+      - name: Test
+        working-directory: brok
+        shell: bash
+        run: cargo test --workspace $FEATURES
+
+  msrv:
+    name: MSRV (1.89, lean)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: brok
+      - uses: actions/checkout@v4
+        with:
+          repository: brokspace/brok-sdk
+          path: brok-sdk
+      - name: Use the brok-sdk checkout
+        run: |
+          mkdir -p .cargo
+          echo '[patch.crates-io]' > .cargo/config.toml
+          echo 'brok-sdk = { path = "brok-sdk" }' >> .cargo/config.toml
+      - uses: dtolnay/rust-toolchain@1.89
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: brok
+      - working-directory: brok
+        run: cargo check --workspace --no-default-features

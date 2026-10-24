@@ -1,0 +1,34 @@
+[package]
+name = "brok-shard"
+description = "Shard registry, installer, sandbox and process supervisor for Brokspace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+brok-core.workspace = true
+brok-sdk.workspace = true
+
+anyhow.workspace = true
+futures.workspace = true
+hex.workspace = true
+reqwest.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+semver.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

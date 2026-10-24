@@ -1,0 +1,26 @@
+[package]
+name = "brok-skills"
+description = "Agent skills (SKILL.md) for Brokspace: built-in catalog, skill shards, export to coding agents"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+include = ["src/**", "skills/**", "build.rs", "Cargo.toml"]
+
+[dependencies]
+brok-core.workspace = true
+brok-shard.workspace = true
+
+anyhow.workspace = true
+include_dir = "0.7"
+serde.workspace = true
+serde_yaml_ng.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

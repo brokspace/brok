@@ -1,0 +1,73 @@
+[package]
+name = "brok-index"
+description = "AST chunking, embeddings and hybrid (BM25 + vector) search for Brokspace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[features]
+default = ["ast", "lancedb", "onnx"]
+# Syntax-aware chunking with tree-sitter (needs a C compiler).
+ast = [
+  "dep:tree-sitter",
+  "dep:tree-sitter-go",
+  "dep:tree-sitter-java",
+  "dep:tree-sitter-javascript",
+  "dep:tree-sitter-python",
+  "dep:tree-sitter-rust",
+  "dep:tree-sitter-typescript",
+]
+# LanceDB chunk store with ANN vector indexes (needs protoc).
+lancedb = ["dep:lancedb"]
+# Local nomic-embed-text embeddings through ONNX Runtime.
+onnx = ["dep:ort", "dep:tokenizers"]
+# Hardware acceleration for the ONNX backend.
+cuda = ["onnx", "ort/cuda"]
+coreml = ["onnx", "ort/coreml"]
+directml = ["onnx", "ort/directml"]
+
+[dependencies]
+brok-core.workspace = true
+brok-sdk.workspace = true
+
+anyhow.workspace = true
+arrow-array.workspace = true
+arrow-buffer.workspace = true
+arrow-ipc.workspace = true
+arrow-schema.workspace = true
+arrow-select = "58"
+bytes.workspace = true
+futures.workspace = true
+globset.workspace = true
+hex.workspace = true
+ignore.workspace = true
+memmap2.workspace = true
+postcard.workspace = true
+rayon.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+lancedb = { workspace = true, optional = true }
+ort = { workspace = true, optional = true }
+tokenizers = { workspace = true, optional = true }
+tree-sitter = { workspace = true, optional = true }
+tree-sitter-go = { workspace = true, optional = true }
+tree-sitter-java = { workspace = true, optional = true }
+tree-sitter-javascript = { workspace = true, optional = true }
+tree-sitter-python = { workspace = true, optional = true }
+tree-sitter-rust = { workspace = true, optional = true }
+tree-sitter-typescript = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

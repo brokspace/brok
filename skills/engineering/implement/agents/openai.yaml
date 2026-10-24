@@ -1,0 +1,5 @@
+interface:
+  display_name: "Implement"
+  short_description: "Build a spec test-first and review it"
+policy:
+  allow_implicit_invocation: false

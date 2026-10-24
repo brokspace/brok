@@ -1,0 +1,79 @@
+# Brokspace workspace configuration.
+# Every key is optional: delete what you do not need and the default applies.
+# Reference: https://github.com/brokspace/brok/blob/main/docs/configuration.md
+version: 1
+
+workspace:
+  # Index git submodules (recursively) as independent "hot" partitions.
+  submodules: true
+
+index:
+  # Glob patterns, relative to the workspace root. .gitignore is always honored.
+  include: ["**/*"]
+  exclude:
+    - "**/.git/**"
+    - "**/.brokspace/**"
+    - "**/target/**"
+    - "**/node_modules/**"
+    - "**/dist/**"
+    - "**/build/**"
+    - "**/*.lock"
+    - "**/*.min.js"
+  # Files larger than this are skipped.
+  max_file_kb: 512
+  # AST nodes longer than this are split into sub-chunks.
+  max_chunk_lines: 120
+  # Chunk store: auto | lancedb | arrow  (auto = lancedb when compiled in).
+  store: auto
+
+embeddings:
+  # Disable to run on BM25 text search only (zero model downloads, minimal RAM).
+  enabled: true
+  model: nomic-embed-text-v1.5
+  # quantized (~140 MB, recommended) | full (~550 MB)
+  variant: quantized
+  # Matryoshka dimensions: 64 | 128 | 256 | 512 | 768
+  dimensions: 768
+  # auto | cpu | cuda | coreml | directml
+  device: auto
+  batch_size: 16
+
+search:
+  limit: 8
+  # Score multiplier for results outside the partition you are working in.
+  cold_weight: 0.85
+
+llm:
+  # Provider used by `brok ask` unless --provider is given.
+  default: ollama
+  providers:
+    ollama:
+      base_url: http://localhost:11434/v1
+      model: qwen2.5-coder:7b
+    lmstudio:
+      base_url: http://localhost:1234/v1
+      model: qwen2.5-coder-7b-instruct
+    anthropic:
+      base_url: https://api.anthropic.com/v1
+      model: claude-sonnet-5-5
+      api_key_env: ANTHROPIC_API_KEY
+    deepseek:
+      base_url: https://api.deepseek.com/v1
+      model: deepseek-chat
+      api_key_env: DEEPSEEK_API_KEY
+
+# Mirror the index to shared storage. Configure interactively with `brok setup`.
+sync:
+  backend: none
+
+shards:
+  brok-agent:
+    enabled: true
+    settings:
+      # Seconds between `git diff` scans.
+      watch_interval_secs: 5
+      # Pre-indexation LLM review of changed files.
+      review:
+        enabled: false
+        include: ["src/api/**"]
+        exclude: ["**/*.md"]

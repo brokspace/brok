@@ -1,0 +1,99 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/brokspace/brok"
+homepage = "https://github.com/brokspace/brok"
+authors = ["Brokspace contributors"]
+
+[workspace.dependencies]
+# Internal crates. `brok-sdk` lives in its own repository and comes from
+# crates.io; for polyrepo development `scripts/bootstrap` patches it to the
+# sibling checkout (see CONTRIBUTING.md).
+brok-sdk = "0.1.0"
+brok-core = { version = "0.1.0", path = "crates/brok-core" }
+brok-bus = { version = "0.1.0", path = "crates/brok-bus" }
+brok-index = { version = "0.1.0", path = "crates/brok-index", default-features = false }
+brok-shard = { version = "0.1.0", path = "crates/brok-shard" }
+brok-skills = { version = "0.1.0", path = "crates/brok-skills" }
+
+# Async runtime & plumbing
+tokio = { version = "1.47", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["codec", "rt"] }
+futures = "0.3"
+bytes = "1.10"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml_ng = "0.10"
+postcard = { version = "1.1", features = ["use-std"] }
+
+# Errors, logging, CLI
+anyhow = "1.0"
+thiserror = "2.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+clap = { version = "4.5", features = ["derive", "env", "wrap_help"] }
+dialoguer = { version = "0.12", default-features = false }
+indicatif = "0.18"
+console = "0.16"
+
+# Utilities
+uuid = { version = "1.18", features = ["serde", "v4"] }
+semver = { version = "1.0", features = ["serde"] }
+sha2 = "0.10"
+hex = "0.4"
+getrandom = "0.3"
+globset = "0.4"
+ignore = "0.4"
+rayon = "1.11"
+memmap2 = "0.9"
+tempfile = "3.20"
+sysinfo = { version = "0.36", default-features = false, features = ["system"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "native-tls", "http2", "charset"] }
+
+# Storage & search
+arrow-array = "58"
+arrow-buffer = "58"
+arrow-ipc = "58"
+arrow-schema = "58"
+# `remote` is required only because lancedb 0.40 references `Error::Http`
+# outside its feature gate (src/job.rs); drop it once fixed upstream.
+# See docs/adr/0007-lancedb-remote-feature-workaround.md.
+lancedb = { version = "0.40", features = ["remote"] }
+
+# ML / parsing (optional native backends)
+ort = "=2.0.0-rc.15"
+tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
+tree-sitter = "0.27"
+tree-sitter-go = "0.25"
+tree-sitter-java = "0.23"
+tree-sitter-javascript = "0.25"
+tree-sitter-python = "0.25"
+tree-sitter-rust = "0.24"
+tree-sitter-typescript = "0.23"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+# Dependencies (LanceDB, DataFusion, ONNX Runtime) are huge: build them
+# optimized and without debug info, which keeps compile memory and test
+# times reasonable. Workspace crates keep full debug info.
+[profile.dev.package."*"]
+opt-level = 1
+debug = false

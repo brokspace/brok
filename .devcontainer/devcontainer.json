@@ -1,0 +1,11 @@
+{
+  "name": "brokspace",
+  "build": { "dockerfile": "Dockerfile" },
+  "workspaceMount": "source=${localWorkspaceFolder}/..,target=/src,type=bind",
+  "workspaceFolder": "/src/brok",
+  "customizations": {
+    "vscode": {
+      "extensions": ["rust-lang.rust-analyzer", "tamasfe.even-better-toml", "redhat.vscode-yaml"]
+    }
+  }
+}
