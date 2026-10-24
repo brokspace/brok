@@ -5,6 +5,7 @@
 # Environment overrides:
 #   BROK_VERSION      release tag to install (default: latest)
 #   BROK_INSTALL_DIR  destination directory (default: %LOCALAPPDATA%\Programs\brok)
+#   BROK_NO_MODIFY_PATH=1  do not add the directory to the user PATH
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
