@@ -53,7 +53,9 @@ curl -fsSL https://raw.githubusercontent.com/brokspace/brok/main/scripts/install
 irm https://raw.githubusercontent.com/brokspace/brok/main/scripts/install.ps1 | iex
 ```
 
-Both install `brok` and `brok-agent` (checksums verified). Prefer Cargo?
+Both install `brok` and `brok-agent` (checksums verified). Prebuilt
+binaries: Linux x86_64/arm64, macOS Apple Silicon, Windows x86_64, and macOS
+Intel (text search only: ONNX Runtime has no Intel Mac build). Prefer Cargo?
 `cargo install brok-cli brok-agent` (needs a C compiler and `protoc`; or
 `--no-default-features` for a pure-Rust, text-search-only build).
 
