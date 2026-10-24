@@ -32,10 +32,30 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
+          set -o pipefail
           if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
             echo "::error::CARGO_REGISTRY_TOKEN is not set (gh secret set CARGO_REGISTRY_TOKEN --org brokspace --visibility all)"
             exit 1
           fi
-          # CI already built and tested this commit on every platform.
-          # --allow-dirty: the vendored skills are copied in on purpose (git-ignored).
-          cargo publish --workspace --no-verify --allow-dirty
+          # Dependency order. Versions already on crates.io are skipped, so a
+          # failed run can simply be re-run; rate limits are waited out.
+          # --no-verify: CI already built and tested this commit everywhere.
+          # --allow-dirty: the vendored skills are copied in on purpose.
+          for crate in brok-core brok-bus brok-index brok-shard brok-skills brok-cli; do
+            version="$(cargo metadata --no-deps --format-version 1 | jq -r --arg c "$crate" '.packages[] | select(.name == $c) | .version')"
+            if curl -fsS -A "brokspace-release (github.com/brokspace/brok)" "https://crates.io/api/v1/crates/$crate/$version" >/dev/null 2>&1; then
+              echo "$crate $version is already published"
+              continue
+            fi
+            for attempt in 1 2 3 4; do
+              if cargo publish -p "$crate" --no-verify --allow-dirty 2>&1 | tee publish.log; then
+                break
+              fi
+              if grep -q "429" publish.log && [ "$attempt" -lt 4 ]; then
+                echo "rate limited; waiting 10 minutes"
+                sleep 600
+              else
+                exit 1
+              fi
+            done
+          done
