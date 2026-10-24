@@ -122,15 +122,28 @@ The final top-k chunk ids are materialized from their stores.
 
 Types live in `brok_sdk::payload`.
 
-## `brok run` lifecycle
+## Daemon lifecycle
 
-Start: bind the bus → issue the operator token (`run/operator.token`) → open
-the index for writing (falls back to read-only search if the model or lock is
-unavailable) and connect the index service → for each enabled shard, issue a
-token from its manifest, build its sandbox environment and supervise it.
+`brok run` is the daemon in the foreground; `brok start` launches the same
+process detached (output in `.brokspace/logs/brok.log`), and `brok ask`,
+`chat`, `review`, `commit` and `skill run` start it on demand. Readiness means
+the bus is listening and, when installed, `brok-agent` is connected; the CLI
+checks it with a `daemon:status` request.
 
-Stop (Ctrl+C): broadcast `system:shutdown` → shards get 3 seconds to exit,
-then are killed → index service stops → bus stops → runtime files removed.
+Start: bind the bus → issue the operator token (`run/operator.token`) → start
+the control service (`daemon:status`, `daemon:stop`) → open the index for
+writing (falls back to read-only search if the model or lock is unavailable),
+catch up on changes made while stopped, and connect the index service → for
+each enabled shard, issue a token from its manifest, build its sandbox
+environment and supervise it.
+
+Stop (Ctrl+C, or `brok stop` publishing `daemon:stop`): broadcast
+`system:shutdown` → shards get 3 seconds to exit, then are killed → index
+service stops → bus stops → runtime files removed.
+
+Freshness: `brok-agent` reports dirty files every few seconds and, when a
+repository's `HEAD` moves (commit, pull, checkout), the files that differ
+between the two commits; root, submodules and nested repositories alike.
 
 Crashing shards restart with exponential backoff (1 s … 30 s); five crashes
 within a minute and the supervisor gives up.
