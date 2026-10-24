@@ -27,7 +27,7 @@ jobs:
           ref: ${{ inputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
       - name: Vendor the built-in skills into brok-skills
-        run: ./scripts/vendor-skills.sh
+        run: bash scripts/vendor-skills.sh
       - name: Publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
