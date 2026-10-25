@@ -80,6 +80,7 @@ Then, in your coding agent: `/ask-brok` to pick a workflow, `/grill-me`
 before a big change, or just ask it to "use brok_search".
 
 `brok doctor` checks everything and tells you how to fix what is missing.
+New here? Follow the **[getting started guide](docs/getting-started.md)**.
 
 ## A day with brok
 
@@ -122,6 +123,7 @@ your workspaces, so `brok init` in the next project takes seconds.
 
 | | |
 |---|---|
+| **[Getting started](docs/getting-started.md)** | **Step by step: install, first workspace, daily use, configuration, troubleshooting** |
 | [Local LLM setup](docs/local-llm.md) | Ollama / LM Studio, which model fits your machine |
 | [Integrations](docs/integrations.md) | Coding agents (MCP + skills), LLMs, storage |
 | [Skills](docs/skills.md) | Built-in workflows, writing and sharing skills |
