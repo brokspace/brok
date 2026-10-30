@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Machines without a GPU get a model one size smaller (`brok init`,
+  `brok setup llm`): `qwen2.5-coder:3b` with 16 GB, `qwen2.5-coder:7b` with
+  32 GB. On a laptop CPU a 7B model needs 3 to 5 minutes per review; 3B is
+  about twice as fast. With an NVIDIA GPU or Apple Silicon nothing changes.
+
 ## [0.2.2] - 2026-10-30
 
 ### Added

@@ -157,6 +157,7 @@ fn size_of(tier: &Tier) -> &'static str {
     match tier.ollama_model {
         "qwen2.5-coder:14b" => "about 9 GB",
         "qwen2.5-coder:7b" => "about 4.7 GB",
+        "qwen2.5-coder:3b" => "about 1.9 GB",
         _ => "about 1 GB",
     }
 }

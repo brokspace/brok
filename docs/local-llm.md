@@ -29,16 +29,24 @@ model is reachable.
 Sizes are for 4-bit quantized models (`Q4_K_M`), the best balance between
 speed and quality.
 
-| Model size | RAM or VRAM | Typical hardware | Recommended (Ollama) |
+| Model size | Memory and GPU | Typical hardware | Recommended (Ollama) |
 |---|---|---|---|
-| 1B to 3B | 8 GB RAM | Office laptops, entry-level Macs | `qwen2.5-coder:1.5b`, `llama3.2:3b` |
-| **7B to 9B** (sweet spot) | 16 GB RAM, or a GPU with 6 GB+ | Mid-range PCs and laptops, M1/M2/M3 Macs | `qwen2.5-coder:7b`, `llama3:8b`, `deepseek-r1:8b` |
-| 14B to 32B | 32 GB RAM, or a GPU with 12 GB+ | Workstations, Mac Pro/Max with 32 GB+ | `qwen2.5-coder:14b`, `deepseek-r1:32b` |
+| 1B to 3B | 8 GB | Office laptops, entry-level Macs | `qwen2.5-coder:1.5b`, `llama3.2:3b` |
+| 3B | 16 GB, no GPU | Business laptops with integrated graphics | `qwen2.5-coder:3b`, `llama3.2:3b` |
+| **7B to 9B** (sweet spot) | 16 GB with a GPU (6 GB+) or Apple Silicon; 32 GB without a GPU | Gaming laptops, M1/M2/M3 Macs, desktops | `qwen2.5-coder:7b`, `llama3:8b`, `deepseek-r1:8b` |
+| 14B to 32B | A GPU with 12 GB+, or 32 GB with a GPU or Apple Silicon | Workstations, Mac Pro/Max with 32 GB+ | `qwen2.5-coder:14b`, `deepseek-r1:32b` |
+
+Without a GPU the model runs on the processor: memory decides what fits,
+but speed decides what is pleasant. A laptop CPU reads a long prompt into a
+7B model at about 15 tokens per second, so a review takes 3 to 5 minutes;
+a 3B model is about twice as fast. That is why machines without a GPU get
+one size smaller. Only NVIDIA GPUs and Apple Silicon are detected; with
+another GPU that Ollama supports, pick the row for your GPU memory.
 
 What to expect: 1B to 3B models answer questions about your code well
 enough (`brok ask`, `brok chat`), but they lose track of longer skills, so
-`brok review`, `brok commit` and most `brok skill run` workflows need 7B or
-larger to be useful.
+`brok review`, `brok commit` and most `brok skill run` workflows are much
+better with 7B or larger.
 
 `brok setup llm` applies exactly this table. Override it any time:
 

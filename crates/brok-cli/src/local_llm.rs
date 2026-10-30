@@ -103,37 +103,49 @@ pub struct Tier {
     pub reason: String,
 }
 
-/// Picks the largest comfortable tier: 14B-class with 32 GB RAM or 12 GB
-/// VRAM, 7B-class with 16 GB RAM or 6 GB VRAM, otherwise 1.5B-3B.
+/// Picks the largest tier that answers in reasonable time.
+///
+/// With a GPU (6 GB+ of NVIDIA memory, or Apple Silicon's unified memory)
+/// memory decides: 14B-class with 12 GB VRAM or 32 GB, 7B-class with 6 GB
+/// VRAM or 16 GB. On the CPU alone speed decides: a laptop reads a review
+/// prompt into a 7B model at ~15 tokens/s, minutes per answer, so CPU-only
+/// machines get one size smaller: 7B with 32 GB, 3B with 16 GB.
 pub fn recommend(hardware: Hardware) -> Tier {
     let vram = hardware.vram_gb.unwrap_or(0);
     // Reported totals are slightly below the marketing size (16 GB -> 15.x GiB).
     let (ram_mid, ram_high) = (15, 30);
+    let ram = hardware.ram_gb;
+    let gpu = vram >= 6 || hardware.apple_silicon;
     let memory = if hardware.apple_silicon { "unified memory" } else { "RAM" };
-    if vram >= 12 || hardware.ram_gb >= ram_high {
-        Tier {
-            size: "14B to 32B",
-            ollama_model: "qwen2.5-coder:14b",
-            lmstudio_hint: "Qwen2.5-Coder-14B-Instruct (Q4_K_M)",
-            alternatives: &["deepseek-r1:32b", "qwen2.5-coder:7b"],
-            reason: format!("{} GB {memory}{}", hardware.ram_gb, vram_note(vram)),
-        }
-    } else if vram >= 6 || hardware.ram_gb >= ram_mid {
-        Tier {
-            size: "7B to 9B",
-            ollama_model: "qwen2.5-coder:7b",
-            lmstudio_hint: "Qwen2.5-Coder-7B-Instruct (Q4_K_M)",
-            alternatives: &["llama3:8b", "deepseek-r1:8b"],
-            reason: format!("{} GB {memory}{}", hardware.ram_gb, vram_note(vram)),
-        }
+    let note = if vram > 0 {
+        vram_note(vram)
+    } else if hardware.apple_silicon {
+        String::new()
     } else {
-        Tier {
-            size: "1B to 3B",
-            ollama_model: "qwen2.5-coder:1.5b",
-            lmstudio_hint: "Qwen2.5-Coder-1.5B-Instruct (Q4_K_M)",
-            alternatives: &["llama3.2:3b"],
-            reason: format!("{} GB {memory}{}", hardware.ram_gb, vram_note(vram)),
-        }
+        ", no GPU found".to_owned()
+    };
+    let reason = format!("{ram} GB {memory}{note}");
+    let tier = |size, ollama_model, lmstudio_hint, alternatives| Tier {
+        size,
+        ollama_model,
+        lmstudio_hint,
+        alternatives,
+        reason: reason.clone(),
+    };
+
+    if vram >= 12 || (gpu && ram >= ram_high) {
+        tier(
+            "14B to 32B",
+            "qwen2.5-coder:14b",
+            "Qwen2.5-Coder-14B-Instruct (Q4_K_M)",
+            &["deepseek-r1:32b", "qwen2.5-coder:7b"],
+        )
+    } else if (gpu && ram >= ram_mid) || vram >= 6 || ram >= ram_high {
+        tier("7B to 9B", "qwen2.5-coder:7b", "Qwen2.5-Coder-7B-Instruct (Q4_K_M)", &["llama3:8b", "deepseek-r1:8b"])
+    } else if ram >= ram_mid {
+        tier("3B", "qwen2.5-coder:3b", "Qwen2.5-Coder-3B-Instruct (Q4_K_M)", &["llama3.2:3b", "qwen2.5-coder:7b"])
+    } else {
+        tier("1B to 3B", "qwen2.5-coder:1.5b", "Qwen2.5-Coder-1.5B-Instruct (Q4_K_M)", &["llama3.2:3b"])
     }
 }
 
@@ -180,11 +192,27 @@ mod tests {
 
     #[test]
     fn tiers_follow_the_local_llm_guide() {
-        assert_eq!(recommend(hw(7, None)).ollama_model, "qwen2.5-coder:1.5b");
-        assert_eq!(recommend(hw(15, None)).ollama_model, "qwen2.5-coder:7b");
-        assert_eq!(recommend(hw(8, Some(8))).ollama_model, "qwen2.5-coder:7b");
-        assert_eq!(recommend(hw(31, None)).ollama_model, "qwen2.5-coder:14b");
-        assert_eq!(recommend(hw(16, Some(12))).ollama_model, "qwen2.5-coder:14b");
+        let model = |hardware| recommend(hardware).ollama_model;
+        let apple = |ram_gb| Hardware { ram_gb, vram_gb: None, apple_silicon: true };
+        // GPU: memory decides.
+        assert_eq!(model(hw(8, Some(8))), "qwen2.5-coder:7b");
+        assert_eq!(model(hw(15, Some(8))), "qwen2.5-coder:7b");
+        assert_eq!(model(hw(31, Some(8))), "qwen2.5-coder:14b");
+        assert_eq!(model(hw(16, Some(12))), "qwen2.5-coder:14b");
+        assert_eq!(model(apple(15)), "qwen2.5-coder:7b");
+        assert_eq!(model(apple(31)), "qwen2.5-coder:14b");
+        // CPU only (or a small GPU): one size smaller, for speed.
+        assert_eq!(model(hw(7, None)), "qwen2.5-coder:1.5b");
+        assert_eq!(model(hw(15, None)), "qwen2.5-coder:3b");
+        assert_eq!(model(hw(15, Some(4))), "qwen2.5-coder:3b");
+        assert_eq!(model(hw(31, None)), "qwen2.5-coder:7b");
+        assert_eq!(model(apple(8)), "qwen2.5-coder:1.5b");
+    }
+
+    #[test]
+    fn the_reason_says_when_no_gpu_was_found() {
+        assert_eq!(recommend(hw(15, None)).reason, "15 GB RAM, no GPU found");
+        assert_eq!(recommend(hw(15, Some(8))).reason, "15 GB RAM, 8 GB GPU memory");
     }
 
     #[test]
