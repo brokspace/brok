@@ -57,11 +57,8 @@ pub async fn review(cwd: &Path, args: ReviewArgs) -> Result<()> {
         ui::step(&format!("Nothing to review: {what} are empty."));
         return Ok(());
     }
-    let (diff, truncated) = truncate(&diff, PROMPT_BUDGET - 200);
-    let mut prompt = format!("Review {what}.\n\n```diff\n{diff}\n```");
-    if truncated {
-        prompt.push_str("\n\n(The diff was truncated; say which parts you could not see.)");
-    }
+    let (diff, truncated) = truncate(&diff, PROMPT_BUDGET - 600);
+    let prompt = review_prompt(&what, diff, truncated);
 
     let skill = skill(&workspace, "code-review")?;
     let (client, _inbox) = daemon::connect_or_start(&workspace).await?;
@@ -138,6 +135,24 @@ pub async fn commit(cwd: &Path, args: CommitArgs) -> Result<()> {
     Ok(())
 }
 
+/// The diff first and the instruction last: small local models follow the
+/// end of a prompt best, and without "you have everything" they tend to ask
+/// for the spec the skill mentions instead of reviewing.
+fn review_prompt(what: &str, diff: &str, truncated: bool) -> String {
+    let mut prompt = format!("These are {what}:\n\n```diff\n{diff}\n```\n\n");
+    if truncated {
+        prompt.push_str("The diff was truncated; say which parts you could not see.\n\n");
+    }
+    prompt.push_str(
+        "Review this diff now. You have what you need: the diff and the workspace context. There is no \
+         separate spec, so judge the code itself and check that the change is complete and consistent \
+         with the code around it (for example, every place that must change together). Answer in the \
+         skill's report format: findings with path:line, most severe first, then the one-line verdict. \
+         Do not ask questions.",
+    );
+    prompt
+}
+
 fn skill(workspace: &Workspace, name: &str) -> Result<SkillInvocation> {
     let catalog = Catalog::load(workspace);
     let skill = catalog.require(name)?;
@@ -189,6 +204,16 @@ mod tests {
         assert_eq!(clean_message("```text\nfix: x\n\nbody\n```\n"), "fix: x\n\nbody");
         assert_eq!(clean_message("\"docs: readme\""), "docs: readme");
         assert_eq!(clean_message("  chore: tidy  "), "chore: tidy");
+    }
+
+    #[test]
+    fn review_prompt_ends_with_the_instruction() {
+        let prompt = review_prompt("the staged changes", "+x", true);
+        assert!(prompt.starts_with("These are the staged changes:\n\n```diff\n+x\n```"));
+        assert!(prompt.contains("truncated"));
+        assert!(prompt.ends_with("Do not ask questions."));
+        // `review` reserves 600 characters of the budget for everything but the diff.
+        assert!(review_prompt("this branch against origin/main", "", true).len() < 600);
     }
 
     #[test]

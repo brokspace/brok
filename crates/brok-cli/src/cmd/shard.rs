@@ -107,7 +107,7 @@ pub async fn run(cwd: &Path, command: Command) -> Result<()> {
                 None => ui::success(&format!("Installed {} {} ({how})", manifest.name, manifest.version)),
             }
             if manifest.has_process() {
-                ui::hint("Restart `brok run` to start it.");
+                ui::hint("Run `brok restart` to start it.");
             }
             if !manifest.skills.is_empty() {
                 ui::hint(
@@ -209,7 +209,7 @@ brok skill list
 ```sh
 brok skill new my-skill --dir skills   # add a skill
              brok shard install ./ --force           # install your working copy
-             brok skill run example \"...\"           # try it on the local LLM (needs brok run)
+             brok skill run example \"...\"           # try it on the local LLM
 ```
 
              Each folder in `skills/` is one skill: a `SKILL.md` with `name` and `description` frontmatter.
@@ -246,7 +246,7 @@ Offline? `brok shard new {name} --skills-only` needs no network.",
     ShardManifest::load_from_dir(target)?;
     ui::success(&format!("Created shard {}", target.display()));
     ui::hint("Implement your handler in src/main.rs, declare topics and permissions in shard.json, then:");
-    ui::hint(&format!("brok shard install {}   &&   brok run   &&   brok bus tail", target.display()));
+    ui::hint(&format!("brok shard install {}   &&   brok restart   &&   brok bus tail", target.display()));
     Ok(())
 }
 

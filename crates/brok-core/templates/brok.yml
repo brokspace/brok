@@ -18,7 +18,12 @@ index:
     - "**/node_modules/**"
     - "**/dist/**"
     - "**/build/**"
+    # Lock files: large, generated, and noise in search results.
     - "**/*.lock"
+    - "**/pnpm-lock.yaml"
+    - "**/package-lock.json"
+    - "**/npm-shrinkwrap.json"
+    - "**/go.sum"
     - "**/*.min.js"
   # Files larger than this are skipped.
   max_file_kb: 512

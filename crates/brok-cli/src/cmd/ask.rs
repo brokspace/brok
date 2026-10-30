@@ -9,7 +9,7 @@ use brok_sdk::payload::{AskChunk, AskDone, AskFailed, AskRequest};
 use brok_sdk::{BrokClient, Event};
 use console::style;
 
-use crate::daemon;
+use crate::{daemon, ui};
 
 /// Arguments of `brok ask`.
 #[derive(Debug, clap::Args)]
@@ -25,7 +25,11 @@ pub struct Args {
     context: Option<usize>,
 }
 
-/// Time without any answer fragment before giving up.
+/// Time to wait for the first answer fragment: a 7B model on a laptop CPU
+/// reads a long prompt (a review, a skill) at ~15 tokens/s, so minutes can
+/// pass before it writes anything.
+const FIRST_TOKEN_TIMEOUT: Duration = Duration::from_secs(600);
+/// Time without a new fragment once the answer is streaming.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(180);
 
 pub async fn run(cwd: &Path, args: Args) -> Result<()> {
@@ -58,11 +62,27 @@ pub async fn stream(client: &BrokClient, request: &AskRequest) -> Result<String>
 
 /// Sends `request` and returns the full answer text.
 pub async fn answer(client: &BrokClient, request: &AskRequest, output: Output) -> Result<String> {
+    let mut waiting = (output == Output::Terminal && ui::interactive())
+        .then(|| ui::spinner("Thinking (a local model on a CPU can take a minute or more)"));
+    let result = receive(client, request, output, &mut waiting).await;
+    if let Some(spinner) = waiting {
+        spinner.finish_and_clear();
+    }
+    result
+}
+
+async fn receive(
+    client: &BrokClient,
+    request: &AskRequest,
+    output: Output,
+    waiting: &mut Option<indicatif::ProgressBar>,
+) -> Result<String> {
     let mut replies = client.request(Event::from_payload(request)?).await?;
     let mut stdout = std::io::stdout().lock();
     let mut text = String::new();
     loop {
-        let reply = match replies.next_timeout(IDLE_TIMEOUT).await {
+        let timeout = if text.is_empty() { FIRST_TOKEN_TIMEOUT } else { IDLE_TIMEOUT };
+        let reply = match replies.next_timeout(timeout).await {
             Ok(reply) => reply,
             Err(brok_sdk::ClientError::Timeout) if text.is_empty() => bail!(
                 "no answer from the agent. Check `brok doctor`: the LLM must be reachable and brok-agent installed"
@@ -70,6 +90,9 @@ pub async fn answer(client: &BrokClient, request: &AskRequest, output: Output) -
             Err(e) => return Err(e.into()),
         };
         if let Ok(chunk) = reply.decode::<AskChunk>() {
+            if let Some(spinner) = waiting.take() {
+                spinner.finish_and_clear();
+            }
             text.push_str(&chunk.text);
             if output == Output::Terminal {
                 stdout.write_all(chunk.text.as_bytes())?;

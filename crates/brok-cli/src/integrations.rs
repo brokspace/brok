@@ -51,16 +51,19 @@ impl Agent {
 /// portable `.agents/skills/` target is always included.
 pub fn detect(root: &Path) -> Vec<Agent> {
     let mut agents = vec![Agent::Agents];
-    if root.join(".claude").is_dir() || root.join("CLAUDE.md").is_file() || on_path("claude") {
+    // IDE extensions (Claude Code in VS Code, Cursor) put no command on PATH,
+    // but every install keeps its settings in a folder in the home directory.
+    let in_home = |dir: &str| home_dir().is_some_and(|h| h.join(dir).is_dir());
+    if root.join(".claude").is_dir() || root.join("CLAUDE.md").is_file() || on_path("claude") || in_home(".claude") {
         agents.push(Agent::Claude);
     }
-    if root.join(".cursor").is_dir() || on_path("cursor") {
+    if root.join(".cursor").is_dir() || on_path("cursor") || in_home(".cursor") {
         agents.push(Agent::Cursor);
     }
     if root.join(".vscode").is_dir() || on_path("code") {
         agents.push(Agent::Vscode);
     }
-    if on_path("codex") || home_dir().is_some_and(|h| h.join(".codex").is_dir()) {
+    if on_path("codex") || in_home(".codex") {
         agents.push(Agent::Codex);
     }
     agents.sort();

@@ -24,7 +24,7 @@ pub enum Command {
         /// Skill name.
         name: String,
     },
-    /// Run a skill on the local LLM through brok-agent (needs `brok run`).
+    /// Run a skill on the local LLM through brok-agent (starts brok in the background).
     Run {
         /// Skill name.
         name: String,

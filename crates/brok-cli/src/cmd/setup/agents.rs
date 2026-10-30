@@ -79,7 +79,7 @@ pub fn configure(workspace: &Workspace, args: &Args) -> Result<()> {
                 Some(McpSetup::Manual { file, snippet }) => {
                     ui::step(&format!("{}: add this to {file} to enable the brok MCP tools:", agent.label()));
                     for line in snippet.lines() {
-                        ui::hint(line);
+                        ui::hint(&format!("  {line}"));
                     }
                 }
                 None => {}
@@ -89,7 +89,7 @@ pub fn configure(workspace: &Workspace, args: &Args) -> Result<()> {
             ui::warn("`brok` is not on PATH, so agents cannot start `brok mcp` yet; add its folder to PATH");
         }
     }
-    ui::hint(
+    ui::step(
         "In your agent, try /ask-brok or ask it to use brok_search. Commit these files to share them with your team.",
     );
     Ok(())

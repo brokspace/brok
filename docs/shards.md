@@ -20,6 +20,12 @@ brok bus tail 'license:*'                # watch what it publishes
 brok shard remove brok-license-check
 ```
 
+To trigger your shard by hand, publish the event it listens to:
+`brok bus emit file:changed '{"changed":["src/main.rs"],"deleted":[]}'`.
+Windows PowerShell 5.1 drops the inner double quotes when it calls a
+program, so escape them there: `'{\"changed\":[\"src/main.rs\"],\"deleted\":[]}'`
+(PowerShell 7 and other shells need no escaping).
+
 Installing:
 
 1. clones the repository (`--depth 1`, optional `--tag`) or uses the local directory;

@@ -28,7 +28,12 @@ struct Spec {
     wrappers: &'static [&'static str],
     /// Nodes attached to the following definition (comments, attributes).
     trivia: &'static [&'static str],
+    /// Values that make a variable declaration a function definition
+    /// (`const handler = async () => {}`); empty outside JS/TS.
+    function_values: &'static [&'static str],
 }
+
+const JS_FUNCTION_VALUES: &[&str] = &["arrow_function", "function_expression", "function", "generator_function"];
 
 const RUST: Spec = Spec {
     language: || tree_sitter_rust::LANGUAGE.into(),
@@ -45,6 +50,7 @@ const RUST: Spec = Spec {
     ],
     wrappers: &[],
     trivia: &["line_comment", "block_comment", "attribute_item"],
+    function_values: &[],
 };
 
 const PYTHON: Spec = Spec {
@@ -52,6 +58,7 @@ const PYTHON: Spec = Spec {
     definitions: &[("function_definition", ChunkKind::Function), ("class_definition", ChunkKind::Class)],
     wrappers: &["decorated_definition"],
     trivia: &["comment"],
+    function_values: &[],
 };
 
 const JS_DEFINITIONS: &[(&str, ChunkKind)] = &[
@@ -66,6 +73,7 @@ const JAVASCRIPT: Spec = Spec {
     definitions: JS_DEFINITIONS,
     wrappers: &["export_statement"],
     trivia: &["comment"],
+    function_values: JS_FUNCTION_VALUES,
 };
 
 const TS_DEFINITIONS: &[(&str, ChunkKind)] = &[
@@ -85,6 +93,7 @@ const TYPESCRIPT: Spec = Spec {
     definitions: TS_DEFINITIONS,
     wrappers: &["export_statement"],
     trivia: &["comment"],
+    function_values: JS_FUNCTION_VALUES,
 };
 
 const TSX: Spec = Spec {
@@ -92,6 +101,7 @@ const TSX: Spec = Spec {
     definitions: TS_DEFINITIONS,
     wrappers: &["export_statement"],
     trivia: &["comment"],
+    function_values: JS_FUNCTION_VALUES,
 };
 
 const GO: Spec = Spec {
@@ -103,6 +113,7 @@ const GO: Spec = Spec {
     ],
     wrappers: &[],
     trivia: &["comment"],
+    function_values: &[],
 };
 
 const JAVA: Spec = Spec {
@@ -118,6 +129,7 @@ const JAVA: Spec = Spec {
     ],
     wrappers: &[],
     trivia: &["line_comment", "block_comment"],
+    function_values: &[],
 };
 
 fn spec(language: AstLanguage) -> &'static Spec {
@@ -235,15 +247,44 @@ impl<'s> Walker<'s> {
     /// Returns the definition node and its kind when `node` is a definition
     /// or wraps one.
     fn definition<'t>(&self, node: Node<'t>) -> Option<(Node<'t>, ChunkKind)> {
-        let kind_of = |n: Node<'_>| self.spec.definitions.iter().find(|(k, _)| *k == n.kind()).map(|(_, kind)| *kind);
-        if let Some(kind) = kind_of(node) {
+        if let Some(kind) = self.kind_of(node) {
             return Some((node, kind));
         }
         if self.spec.wrappers.contains(&node.kind()) {
             let mut cursor = node.walk();
-            return node.named_children(&mut cursor).find_map(|child| kind_of(child).map(|kind| (child, kind)));
+            return node.named_children(&mut cursor).find_map(|child| self.kind_of(child).map(|kind| (child, kind)));
         }
         None
+    }
+
+    fn kind_of(&self, node: Node<'_>) -> Option<ChunkKind> {
+        if let Some((_, kind)) = self.spec.definitions.iter().find(|(k, _)| *k == node.kind()) {
+            return Some(*kind);
+        }
+        self.is_function_binding(node).then_some(ChunkKind::Function)
+    }
+
+    /// `const name = () => ...`, `const name = function () {}`, or a call
+    /// wrapping one (`memo(() => ...)`): a function in all but syntax. Only
+    /// declarations of a single variable qualify.
+    fn is_function_binding(&self, node: Node<'_>) -> bool {
+        if self.spec.function_values.is_empty()
+            || !matches!(node.kind(), "lexical_declaration" | "variable_declaration")
+        {
+            return false;
+        }
+        let mut cursor = node.walk();
+        let declarators: Vec<_> =
+            node.named_children(&mut cursor).filter(|c| c.kind() == "variable_declarator").collect();
+        let [declarator] = declarators.as_slice() else { return false };
+        let Some(value) = declarator.child_by_field_name("value") else { return false };
+        let is_function = |n: Node<'_>| self.spec.function_values.contains(&n.kind());
+        is_function(value)
+            || (value.kind() == "call_expression"
+                && value.child_by_field_name("arguments").is_some_and(|args| {
+                    let mut cursor = args.walk();
+                    args.named_children(&mut cursor).any(is_function)
+                }))
     }
 
     fn emit_definition(
@@ -439,6 +480,32 @@ impl fmt::Display for Point {
         let kinds: Vec<_> = chunks.iter().map(|c| (c.0, c.1.as_deref())).collect();
         assert_eq!(kinds, vec![(ChunkKind::Interface, Some("Props")), (ChunkKind::Function, Some("render"))]);
         assert!(chunks[1].2.starts_with("export function"));
+    }
+
+    #[test]
+    fn arrow_functions_bound_to_constants_are_definitions() {
+        let src = "import { SetMetadata } from '@nestjs/common';\n\n\
+                   /** Skips auth. */\n\
+                   export const Public = () => SetMetadata('isPublic', true);\n\
+                   export const CurrentUser = createParamDecorator((data: unknown) => data);\n\
+                   const LIMIT = 10;\n";
+        let chunks = run(AstLanguage::TypeScript, src, 120);
+        let kinds: Vec<_> = chunks.iter().map(|c| (c.0, c.1.as_deref())).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                (ChunkKind::Preamble, None),
+                (ChunkKind::Function, Some("Public")),
+                (ChunkKind::Function, Some("CurrentUser")),
+                (ChunkKind::Preamble, None),
+            ]
+        );
+        assert!(chunks[1].2.starts_with("/** Skips auth. */\nexport const Public"));
+
+        let js = "const a = 1, b = () => 2;\nlet handler = async function (event) {\n  return event;\n};\n";
+        let chunks = run(AstLanguage::JavaScript, js, 120);
+        let kinds: Vec<_> = chunks.iter().map(|c| (c.0, c.1.as_deref())).collect();
+        assert_eq!(kinds, vec![(ChunkKind::Preamble, None), (ChunkKind::Function, Some("handler"))]);
     }
 
     #[test]

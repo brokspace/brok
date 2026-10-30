@@ -6,6 +6,33 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Lock files (`pnpm-lock.yaml`, `package-lock.json`, `npm-shrinkwrap.json`,
+  `go.sum`, plus `*.lock` as before) are not indexed by default: in a small
+  NestJS project `pnpm-lock.yaml` alone was 64% of the chunks and the top
+  search hit, and indexing took 5x longer.
+- JavaScript and TypeScript functions written as `const name = () => ...`
+  (or wrapped, like `memo(() => ...)`) are indexed as functions with their
+  name, instead of anonymous preamble code.
+- `brok review` sends the diff first and a self-contained instruction last,
+  so local models review instead of asking for a spec.
+- Answers wait up to 10 minutes for the first word, with a spinner: a 7B
+  model on a laptop CPU needs minutes to read a review prompt. The 3-minute
+  limit still applies between words.
+- `brok bus tail` shows the time of day instead of epoch milliseconds.
+
+### Fixed
+
+- Claude Code (VS Code / JetBrains extension) and Cursor are detected from
+  their settings folder in the home directory, so `brok init` and
+  `brok setup agents` set them up without a `claude` command on `PATH`.
+- Saving `brok.yml` (`brok setup llm`, `brok setup sync`, `brok init`) keeps
+  the explanatory comments of the template.
+- `brok mcp` ignores a byte order mark at the start of a message.
+- Hints point to `brok start` / `brok restart` instead of the foreground
+  `brok run` (`brok doctor`, `brok shard install`, `brok shard new`).
+
 ## [0.2.0] - 2026-10-25
 
 ### Added

@@ -54,7 +54,7 @@ pub async fn run(cwd: &Path, command: Command) -> Result<()> {
                         } else {
                             println!(
                                 "{} {} {} {}",
-                                style(event.timestamp_ms).dim(),
+                                style(time_of_day(event.timestamp_ms)).dim(),
                                 style(&event.topic).cyan().bold(),
                                 style(format!("from {}", event.source)).dim(),
                                 event.payload
@@ -78,4 +78,20 @@ pub async fn run(cwd: &Path, command: Command) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// `HH:MM:SS.mmm` in UTC, like the timestamps of `brok logs`.
+fn time_of_day(timestamp_ms: u64) -> String {
+    let ms = timestamp_ms % 86_400_000;
+    format!("{:02}:{:02}:{:02}.{:03}", ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn time_of_day_is_utc() {
+        // 2026-10-30T14:24:08.291Z
+        assert_eq!(super::time_of_day(1_793_370_248_291), "14:24:08.291");
+        assert_eq!(super::time_of_day(0), "00:00:00.000");
+    }
 }
