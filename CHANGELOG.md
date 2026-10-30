@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `brok stop` (and `brok restart`) return only after the daemon process has
+  exited, not when it stops listening: replacing `brok.exe` right after a
+  stop (an upgrade) no longer fails with "file in use" on Windows.
+
 ## [0.2.1] - 2026-10-30
 
 ### Changed

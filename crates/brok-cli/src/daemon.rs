@@ -183,19 +183,48 @@ async fn wait_ready(workspace: &Workspace, pid: u32, timeout: Duration) -> Resul
 }
 
 /// Asks the daemon to stop and waits until it has.
+/// Returns once the process has exited, not just closed the bus: until then
+/// Windows keeps `brok.exe` locked, and replacing it (an upgrade) fails.
 pub async fn stop(workspace: &Workspace) -> Result<bool> {
     if !is_running(workspace).await {
         return Ok(false);
     }
+    let pid = std::fs::read_to_string(workspace.paths().pid_file()).ok().and_then(|s| s.trim().parse::<u32>().ok());
     let (client, _inbox) = connect(workspace).await?;
     client.emit(&DaemonStop {}).await?;
     drop(client);
     let deadline = Instant::now() + Duration::from_secs(15);
-    while is_running(workspace).await {
+    while is_running(workspace).await || pid.is_some_and(process_alive) {
         if Instant::now() > deadline {
             bail!("brok did not stop within 15s; see {}", log_file(workspace).display());
         }
         tokio::time::sleep(Duration::from_millis(150)).await;
     }
     Ok(true)
+}
+
+/// Whether a process with this id is still running (a zombie counts as gone).
+fn process_alive(pid: u32) -> bool {
+    let pid = sysinfo::Pid::from_u32(pid);
+    let mut system = sysinfo::System::new();
+    system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
+    system.process(pid).is_some_and(|p| p.status() != sysinfo::ProcessStatus::Zombie)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::process_alive;
+
+    #[test]
+    fn process_alive_tracks_exit() {
+        assert!(process_alive(std::process::id()));
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--list")
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        assert!(!process_alive(pid));
+    }
 }
