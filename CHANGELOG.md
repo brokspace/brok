@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-30
+
 ### Added
 
 - `brok upgrade`: shows what changed since your version (from this
