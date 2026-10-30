@@ -16,6 +16,7 @@ pub mod setup;
 pub mod shard;
 pub mod skill;
 pub mod status;
+pub mod upgrade;
 
 use std::path::Path;
 use std::sync::Arc;

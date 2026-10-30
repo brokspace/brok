@@ -63,6 +63,11 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
     let mut shards = JoinSet::new();
     let mut started = Vec::new();
     if !args.no_shards {
+        match super::init::refresh_agent(&Registry::new(&paths)).await {
+            Ok(Some(version)) => tracing::info!(%version, "updated brok-agent from the one next to brok"),
+            Ok(None) => {}
+            Err(e) => tracing::warn!(error = %format!("{e:#}"), "cannot update brok-agent"),
+        }
         for shard in Registry::new(&paths).list()? {
             let name = shard.manifest.name.clone();
             if !workspace.config().shard_enabled(&name) {

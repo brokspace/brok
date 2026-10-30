@@ -124,7 +124,7 @@ fn detach(command: &mut std::process::Command) {
 /// `brok ask | less` would never see end of file.
 #[cfg(windows)]
 #[allow(unsafe_code)]
-fn without_inherited_std_handles<T>(spawn: impl FnOnce() -> T) -> T {
+pub(crate) fn without_inherited_std_handles<T>(spawn: impl FnOnce() -> T) -> T {
     use windows_sys::Win32::Foundation::{
         GetHandleInformation, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation,
     };
@@ -152,7 +152,7 @@ fn without_inherited_std_handles<T>(spawn: impl FnOnce() -> T) -> T {
 }
 
 #[cfg(unix)]
-fn without_inherited_std_handles<T>(spawn: impl FnOnce() -> T) -> T {
+pub(crate) fn without_inherited_std_handles<T>(spawn: impl FnOnce() -> T) -> T {
     spawn() // Rust opens every descriptor with CLOEXEC; only the explicit stdio is passed.
 }
 

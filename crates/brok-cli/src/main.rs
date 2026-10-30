@@ -64,6 +64,8 @@ enum Command {
     Setup(cmd::setup::Args),
     /// Check the installation and explain how to fix what is missing.
     Doctor(cmd::doctor::Args),
+    /// Upgrade brok and brok-agent to the latest release and show what changed.
+    Upgrade(cmd::upgrade::Args),
     /// Agent skills: list, run on the local LLM, create, export to coding agents.
     #[command(subcommand)]
     Skill(cmd::skill::Command),
@@ -86,6 +88,8 @@ enum Command {
 }
 
 fn main() -> ExitCode {
+    // Before parsing: `brok --version` exits inside `parse`.
+    cmd::upgrade::remove_leftovers();
     let cli = Cli::parse();
     init_tracing(&cli);
 
@@ -126,6 +130,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Status(args) => cmd::status::run(&cwd, args).await,
         Command::Setup(args) => cmd::setup::run(&cwd, args).await,
         Command::Doctor(args) => cmd::doctor::run(&cwd, args).await,
+        Command::Upgrade(args) => cmd::upgrade::run(&cwd, args).await,
         Command::Skill(command) => cmd::skill::run(&cwd, command).await,
         Command::Mcp(args) => cmd::mcp::run(&cwd, args).await,
         Command::Completions { shell } => {

@@ -12,7 +12,8 @@ skip what you do not need.
 7. [Skills](#7-skills)
 8. [Shards](#8-shards)
 9. [Troubleshooting](#9-troubleshooting)
-10. [Uninstall](#10-uninstall)
+10. [Update brok](#10-update-brok)
+11. [Uninstall](#11-uninstall)
 
 ---
 
@@ -299,7 +300,28 @@ output of `brok doctor`.
 
 ---
 
-## 10. Uninstall
+## 10. Update brok
+
+```sh
+brok upgrade --check    # is there a new version, and what changed?
+brok upgrade            # shows what changed, asks, then upgrades
+```
+
+`brok upgrade` downloads the new `brok` and `brok-agent`, checks them
+against the release checksums, swaps them in and restarts brok in every
+workspace where it was running (each workspace's agent is refreshed on
+that restart). `brok doctor` tells you when a new version is out.
+
+Then run `brok skill export` in your workspaces so your coding agents get
+the updated built-in skills.
+
+Installed with Cargo? Upgrade with `cargo install brok-cli brok-agent`.
+Coming from brok 0.2.1 or older (no `upgrade` command yet)? Run the install
+command from [step 1](#1-install-brok) again, once.
+
+---
+
+## 11. Uninstall
 
 ```sh
 brok stop                    # in each workspace where it runs

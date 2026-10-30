@@ -110,6 +110,7 @@ your workspaces, so `brok init` in the next project takes seconds.
 | `brok commit [--yes \| --print]` | Commit message for the staged changes, then commit |
 | `brok start` / `stop` / `restart` / `logs -f` | The background daemon (bus, live indexing, agent) |
 | `brok status` / `brok doctor` | What is indexed and running / health check with fixes |
+| `brok upgrade [--check]` | Upgrade brok and brok-agent to the latest release, with what changed |
 | `brok index [--rebuild]` | Re-index (incremental; the daemon does it automatically) |
 | `brok setup llm \| agents \| sync` | Local LLM, coding agent integrations, index mirroring |
 | `brok skill list \| show \| run \| new \| export` | Agent skills |

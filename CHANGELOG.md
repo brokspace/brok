@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `brok upgrade`: shows what changed since your version (from this
+  changelog), downloads the new `brok` and `brok-agent`, verifies their
+  checksums, swaps them in (also on Windows, where a running program cannot
+  be overwritten) and restarts brok in every workspace where it was running.
+  `brok upgrade --check` only reports; `--to <version>` picks a version.
+  Installs made with Cargo are pointed to `cargo install` instead.
+- `brok doctor` says when a newer brok is available.
+- Each workspace's copy of `brok-agent` is refreshed when brok starts and the
+  agent next to `brok` is newer, so upgrades reach every workspace.
+
 ### Fixed
 
 - `brok stop` (and `brok restart`) return only after the daemon process has
