@@ -66,17 +66,20 @@ Search works without any LLM. Answers (`brok ask`, `chat`, `review`,
 
 Pick the model for your machine:
 
-| Your memory | Model | Download |
+| Your machine | Model | Download |
 |---|---|---|
 | 8 GB | `qwen2.5-coder:1.5b` | `ollama pull qwen2.5-coder:1.5b` |
-| 16 GB (or a GPU with 6 GB+) | `qwen2.5-coder:7b` | `ollama pull qwen2.5-coder:7b` |
-| 32 GB (or a GPU with 12 GB+) | `qwen2.5-coder:14b` | `ollama pull qwen2.5-coder:14b` |
+| 16 GB, no GPU (most business laptops) | `qwen2.5-coder:3b` | `ollama pull qwen2.5-coder:3b` |
+| 16 GB with a GPU (6 GB+) or Apple Silicon; 32 GB without a GPU | `qwen2.5-coder:7b` | `ollama pull qwen2.5-coder:7b` |
+| A GPU with 12 GB+, or 32 GB with a GPU or Apple Silicon | `qwen2.5-coder:14b` | `ollama pull qwen2.5-coder:14b` |
 
 Not sure? Skip the pull: `brok init` (next step) measures your machine and
 offers to download the right one.
 
-The 1.5b model is fine for questions (`ask`, `chat`); reviews and commit
-messages need 7b or larger to be useful.
+Small models (1.5b, 3b) are fine for questions (`ask`, `chat`); reviews and
+commit messages are much better with 7b or larger. Without a GPU, a 7b
+model takes a few minutes per review, which is why the table suggests 3b
+there.
 
 Prefer a graphical app? [LM Studio](https://lmstudio.ai) works too: download a
 model, open **Developer / Local Server** and press **Start Server**. More in
@@ -286,7 +289,7 @@ Start with `brok doctor`: it checks everything and prints the fix.
 |---|---|
 | `no answer from the agent` | Start your LLM (open Ollama / LM Studio), then `brok doctor` |
 | `ollama ... is not installed` | `ollama pull <model>` as shown by `brok doctor` |
-| Answers take minutes | The model runs on your CPU. Normal for 7b on a laptop without a GPU (a review can take 3 to 5 minutes); for faster answers try `ollama pull qwen2.5-coder:3b` and `brok setup llm --model qwen2.5-coder:3b` |
+| Answers take minutes | The model runs on your CPU. Normal for 7b on a laptop without a GPU (a review can take 3 to 5 minutes); for faster answers use 3b: `ollama pull qwen2.5-coder:3b`, then `brok setup llm --provider ollama --model qwen2.5-coder:3b` |
 | Search misses recent code | `brok status`; if the daemon is stopped, `brok start` catches up |
 | `another brok process is writing the index` | `brok` is running in the background and already indexes for you; skip `brok index`, or `brok stop` first |
 | Results come back as text only | The search model is missing: `brok model download` |
