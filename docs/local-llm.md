@@ -46,7 +46,9 @@ another GPU that Ollama supports, pick the row for your GPU memory.
 What to expect: 1B to 3B models answer questions about your code well
 enough (`brok ask`, `brok chat`), but they lose track of longer skills, so
 `brok review`, `brok commit` and most `brok skill run` workflows are much
-better with 7B or larger.
+better with 7B or larger. Even at 7B, a review is a first pass that can be
+wrong; 14B and hosted models (`brok review -p anthropic`) review much
+better, and commit messages are already good at 7B.
 
 `brok setup llm` applies exactly this table. Override it any time:
 
