@@ -144,6 +144,10 @@ Handy while developing shards: `brok run -v` in one terminal and
 
 All publishing uses the `CARGO_REGISTRY_TOKEN` organization secret.
 
+Release binaries are not signed yet; the plan (Windows signing, winget,
+macOS notarization, provenance attestations) is in
+[docs/maintainers/code-signing.md](docs/maintainers/code-signing.md).
+
 ## Code of conduct
 
 Participation is governed by our [Code of Conduct](CODE_OF_CONDUCT.md).
