@@ -320,7 +320,9 @@ async fn run_build(command: &[String], dir: &Path) -> Result<()> {
     Ok(())
 }
 
-async fn download_verified(url: &str, expected_sha256: &str, target: &Path) -> Result<()> {
+/// Downloads `url` to `target` (through `target.part`), failing unless its
+/// SHA-256 matches. `target` is only written once the checksum is good.
+pub async fn download_verified(url: &str, expected_sha256: &str, target: &Path) -> Result<()> {
     let response = reqwest::get(url).await?.error_for_status()?;
     let partial = target.with_extension("part");
     let mut file = tokio::fs::File::create(&partial).await?;

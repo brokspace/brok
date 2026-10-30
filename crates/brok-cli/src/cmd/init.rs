@@ -16,7 +16,7 @@ use anyhow::{Context, Result, ensure};
 use brok_core::Workspace;
 use brok_core::init::{InitOptions, init_workspace};
 use brok_sdk::ShardManifest;
-use brok_shard::{Registry, SYSTEM_AGENT, find_executable};
+use brok_shard::{Registry, SYSTEM_AGENT, ShardSource, find_executable};
 use dialoguer::Confirm;
 
 use super::setup::{agents, llm};
@@ -189,10 +189,33 @@ fn disable_embeddings(workspace: &mut Workspace, why: &str) -> Result<()> {
 /// agent describes itself with `brok-agent --manifest`.
 async fn install_agent(registry: &Registry) -> Result<semver::Version> {
     let binary = find_executable(SYSTEM_AGENT).context("`brok-agent` was not found next to brok or on PATH")?;
-    let output = tokio::process::Command::new(&binary).arg("--manifest").output().await?;
-    ensure!(output.status.success(), "`{} --manifest` failed", binary.display());
-    let manifest = ShardManifest::from_json(&String::from_utf8_lossy(&output.stdout))?;
+    let manifest = agent_manifest(&binary).await?;
     let version = manifest.version.clone();
     brok_shard::install::install_builtin(registry, manifest, &binary)?;
     Ok(version)
+}
+
+/// Each workspace runs its own copy of `brok-agent`. After `brok upgrade`
+/// the one next to `brok` is newer: copy it in again. Only the builtin
+/// agent is refreshed; one installed from git or a folder is left alone.
+pub(crate) async fn refresh_agent(registry: &Registry) -> Result<Option<semver::Version>> {
+    let Some(installed) = registry.get(SYSTEM_AGENT)? else { return Ok(None) };
+    if installed.lock.as_ref().is_none_or(|lock| lock.source != ShardSource::Builtin) {
+        return Ok(None);
+    }
+    let Some(binary) = find_executable(SYSTEM_AGENT) else { return Ok(None) };
+    let manifest = agent_manifest(&binary).await?;
+    if manifest.version <= installed.manifest.version {
+        return Ok(None);
+    }
+    let version = manifest.version.clone();
+    brok_shard::install::install_builtin(registry, manifest, &binary)?;
+    Ok(Some(version))
+}
+
+/// The agent describes itself with `brok-agent --manifest`.
+async fn agent_manifest(binary: &Path) -> Result<ShardManifest> {
+    let output = tokio::process::Command::new(binary).arg("--manifest").output().await?;
+    ensure!(output.status.success(), "`{} --manifest` failed", binary.display());
+    Ok(ShardManifest::from_json(&String::from_utf8_lossy(&output.stdout))?)
 }

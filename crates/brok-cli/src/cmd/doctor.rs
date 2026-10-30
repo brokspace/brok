@@ -52,6 +52,12 @@ pub async fn run(cwd: &Path, _args: Args) -> Result<()> {
     let features = brok_index::compiled_features();
     let build = if features.is_empty() { "lean build: text search only".to_owned() } else { features.join(", ") };
     report.line(Status::Ok, "brok", &format!("{} ({build})", env!("CARGO_PKG_VERSION")), None);
+    // Offline or rate limited: say nothing rather than slow the check down.
+    if let Some(latest) = super::upgrade::latest_version(std::time::Duration::from_secs(3)).await
+        && semver::Version::parse(env!("CARGO_PKG_VERSION")).is_ok_and(|current| latest > current)
+    {
+        report.line(Status::Warn, "update", &format!("brok {latest} is available"), Some("brok upgrade"));
+    }
 
     if integrations::on_path("git") {
         report.line(Status::Ok, "git", "found", None);
