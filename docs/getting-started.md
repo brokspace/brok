@@ -74,6 +74,9 @@ Pick the model for your machine:
 Not sure? Skip the pull: `brok init` (next step) measures your machine and
 offers to download the right one.
 
+The 1.5b model is fine for questions (`ask`, `chat`); reviews and commit
+messages need 7b or larger to be useful.
+
 Prefer a graphical app? [LM Studio](https://lmstudio.ai) works too: download a
 model, open **Developer / Local Server** and press **Start Server**. More in
 [local-llm.md](local-llm.md).
@@ -280,6 +283,7 @@ Start with `brok doctor`: it checks everything and prints the fix.
 |---|---|
 | `no answer from the agent` | Start your LLM (open Ollama / LM Studio), then `brok doctor` |
 | `ollama ... is not installed` | `ollama pull <model>` as shown by `brok doctor` |
+| Answers take minutes | The model runs on your CPU. Normal for 7b on a laptop without a GPU (a review can take 3 to 5 minutes); for faster answers try `ollama pull qwen2.5-coder:3b` and `brok setup llm --model qwen2.5-coder:3b` |
 | Search misses recent code | `brok status`; if the daemon is stopped, `brok start` catches up |
 | `another brok process is writing the index` | `brok` is running in the background and already indexes for you; skip `brok index`, or `brok stop` first |
 | Results come back as text only | The search model is missing: `brok model download` |

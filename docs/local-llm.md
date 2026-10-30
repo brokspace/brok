@@ -35,6 +35,11 @@ speed and quality.
 | **7B to 9B** (sweet spot) | 16 GB RAM, or a GPU with 6 GB+ | Mid-range PCs and laptops, M1/M2/M3 Macs | `qwen2.5-coder:7b`, `llama3:8b`, `deepseek-r1:8b` |
 | 14B to 32B | 32 GB RAM, or a GPU with 12 GB+ | Workstations, Mac Pro/Max with 32 GB+ | `qwen2.5-coder:14b`, `deepseek-r1:32b` |
 
+What to expect: 1B to 3B models answer questions about your code well
+enough (`brok ask`, `brok chat`), but they lose track of longer skills, so
+`brok review`, `brok commit` and most `brok skill run` workflows need 7B or
+larger to be useful.
+
 `brok setup llm` applies exactly this table. Override it any time:
 
 ```sh

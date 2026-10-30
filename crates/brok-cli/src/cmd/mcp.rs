@@ -42,10 +42,12 @@ pub async fn run(cwd: &Path, _args: Args) -> Result<()> {
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut stdout = tokio::io::stdout();
     while let Some(line) = lines.next_line().await? {
+        // Windows shells piping into a process may prefix a byte order mark.
+        let line = line.trim_start_matches('\u{feff}');
         if line.trim().is_empty() {
             continue;
         }
-        let response = match serde_json::from_str::<Value>(&line) {
+        let response = match serde_json::from_str::<Value>(line) {
             Ok(message) => server.handle(message).await,
             Err(e) => Some(error(Value::Null, -32700, &format!("parse error: {e}"))),
         };

@@ -1,6 +1,8 @@
 # Configuration reference
 
-`brok init` writes `.brokspace/brok.yml` with comments. Every key is optional;
+`brok init` writes `.brokspace/brok.yml` with comments (commands that change
+the file, like `brok setup llm`, keep them; comments you add yourself are
+dropped when brok rewrites the file). Every key is optional;
 missing keys take the defaults below. Unknown keys are rejected with a
 "did you mean" style error, so typos never go unnoticed.
 
@@ -19,7 +21,7 @@ triggers a rebuild of the affected partitions on the next `brok index`.
 | Key | Default | Description |
 |---|---|---|
 | `include` | `["**/*"]` | Globs (relative to the workspace root) of files to index. |
-| `exclude` | `.git`, `.brokspace`, `target`, `node_modules`, `dist`, `build`, `*.lock`, `*.min.js` | Globs to skip. `.gitignore` files are always honored on top of this. |
+| `exclude` | `.git`, `.brokspace`, `target`, `node_modules`, `dist`, `build`, lock files (`*.lock`, `pnpm-lock.yaml`, `package-lock.json`, `npm-shrinkwrap.json`, `go.sum`), `*.min.js` | Globs to skip. `.gitignore` files are always honored on top of this. |
 | `max_file_kb` | `512` | Larger files are skipped. Binary files (NUL bytes) and non UTF-8 files are always skipped. |
 | `max_chunk_lines` | `120` | A syntactic unit longer than this is split: containers into members, other nodes at line boundaries. |
 | `store` | `auto` | `auto` (LanceDB when compiled in), `lancedb` or `arrow` (memory-mapped Arrow IPC, exact vector search). |

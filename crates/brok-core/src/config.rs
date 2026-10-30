@@ -93,6 +93,10 @@ impl Default for IndexConfig {
                 "**/dist/**",
                 "**/build/**",
                 "**/*.lock",
+                "**/pnpm-lock.yaml",
+                "**/package-lock.json",
+                "**/npm-shrinkwrap.json",
+                "**/go.sum",
                 "**/*.min.js",
             ]
             .map(String::from)
@@ -337,14 +341,11 @@ impl BrokConfig {
         })
     }
 
-    /// Writes the config as YAML (comments of the original file are not kept).
+    /// Writes the config as YAML. The explanations of the default template
+    /// are kept next to the keys they describe; other comments are not.
     pub fn save(&self, path: &Path) -> Result<()> {
         let yaml = serde_yaml_ng::to_string(self).map_err(|e| CoreError::Config(e.to_string()))?;
-        let text = format!(
-            "# Brokspace workspace configuration.\n\
-             # Reference: https://github.com/brokspace/brok/blob/main/docs/configuration.md\n{yaml}"
-        );
-        crate::fsutil::write_atomic(path, text.as_bytes())
+        crate::fsutil::write_atomic(path, annotate(&yaml, DEFAULT_TEMPLATE).as_bytes())
     }
 
     /// Semantic checks that serde cannot express.
@@ -385,9 +386,131 @@ impl BrokConfig {
     }
 }
 
+/// Copies the comments of `template` into `yaml` (block-style YAML as serde
+/// writes it): the leading header goes first, and every other comment block
+/// lands above the same key or list item. Top-level sections are separated by
+/// a blank line, like in the template.
+fn annotate(yaml: &str, template: &str) -> String {
+    let mut header = Vec::new();
+    let mut comments: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    let mut pending = Vec::new();
+    let mut locator = Locator::default();
+    for line in template.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            pending.push(trimmed);
+        } else if let Some(location) = locator.locate(line) {
+            if header.is_empty() && comments.is_empty() && location.path() == "version" {
+                header = std::mem::take(&mut pending);
+            } else if !pending.is_empty() {
+                comments.insert(location.path().to_owned(), std::mem::take(&mut pending));
+            }
+        }
+    }
+
+    let mut out = String::new();
+    for line in header {
+        out.push_str(line);
+        out.push('\n');
+    }
+    let mut locator = Locator::default();
+    let mut first = true;
+    for line in yaml.lines() {
+        if let Some(location) = locator.locate(line) {
+            let indent = line.len() - line.trim_start().len();
+            if matches!(location, Located::Key(_)) && indent == 0 && !std::mem::take(&mut first) {
+                out.push('\n');
+            }
+            for comment in comments.remove(location.path()).unwrap_or_default() {
+                out.push_str(&" ".repeat(indent));
+                out.push_str(comment);
+                out.push('\n');
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+/// Where a YAML line sits: `index.exclude` for a key, `index.exclude[]**/*.lock`
+/// for a list item.
+enum Located {
+    Key(String),
+    Item(String),
+}
+
+impl Located {
+    fn path(&self) -> &str {
+        match self {
+            Located::Key(path) | Located::Item(path) => path,
+        }
+    }
+}
+
+/// Tracks the key path of block-style YAML, one line at a time. List items
+/// may be indented under their key (hand-written) or level with it (serde).
+#[derive(Default)]
+struct Locator {
+    stack: Vec<(usize, String)>,
+}
+
+impl Locator {
+    fn locate(&mut self, line: &str) -> Option<Located> {
+        let content = line.trim_start();
+        let indent = line.len() - content.len();
+        let content = content.trim_end();
+        if content.is_empty() || content.starts_with('#') {
+            return None;
+        }
+        let unquote = |s: &str| s.trim().trim_matches(['"', '\'']).to_owned();
+        if let Some(item) = content.strip_prefix('-') {
+            while self.stack.last().is_some_and(|(i, _)| *i > indent) {
+                self.stack.pop();
+            }
+            return Some(Located::Item(format!("{}[]{}", self.path(), unquote(item))));
+        }
+        let (key, _) = content.split_once(':')?;
+        while self.stack.last().is_some_and(|(i, _)| *i >= indent) {
+            self.stack.pop();
+        }
+        self.stack.push((indent, unquote(key)));
+        Some(Located::Key(self.path()))
+    }
+
+    fn path(&self) -> String {
+        self.stack.iter().map(|(_, key)| key.as_str()).collect::<Vec<_>>().join(".")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn save_keeps_the_template_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brok.yml");
+        let mut config = BrokConfig::from_yaml(DEFAULT_TEMPLATE).unwrap();
+        config.llm.providers.get_mut("ollama").unwrap().model = "qwen2.5-coder:1.5b".into();
+        config.save(&path).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("# Brokspace workspace configuration.\n"), "{text}");
+        for comment in [
+            "  # Glob patterns, relative to the workspace root.",
+            "  # Lock files: large, generated",
+            "  # Disable to run on BM25",
+            "  # Provider used by `brok ask`",
+            "      # Seconds between `git diff` scans.",
+            "# Mirror the index to shared storage.",
+        ] {
+            assert!(text.contains(comment), "`{comment}` missing:\n{text}");
+        }
+        assert!(text.contains("\n\nindex:\n"), "{text}");
+        assert!(text.contains("qwen2.5-coder:1.5b"));
+        assert_eq!(BrokConfig::load(&path).unwrap(), config);
+    }
 
     #[test]
     fn template_is_valid_and_matches_defaults() {

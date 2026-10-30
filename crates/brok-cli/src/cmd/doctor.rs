@@ -188,7 +188,12 @@ async fn check_workspace(workspace: &Workspace, report: &mut Report) {
     if daemon::is_running(workspace).await {
         report.line(Status::Ok, "daemon", "running", None);
     } else {
-        report.line(Status::Warn, "daemon", "not running", Some("brok run   (live indexing, ask, skill run)"));
+        report.line(
+            Status::Warn,
+            "daemon",
+            "not running",
+            Some("brok start   (live indexing; ask, chat and skill run also start it)"),
+        );
     }
 
     let root = workspace.root();
