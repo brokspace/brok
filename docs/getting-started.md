@@ -85,7 +85,9 @@ model, open **Developer / Local Server** and press **Start Server**. More in
 
 ## 3. Set up your first workspace
 
-Go to your project (one repository, or a folder holding several) and run:
+Go to your project (one repository, or a folder holding several) and run
+(want a sample project first? clone
+[example-nestjs](https://github.com/brokspace/example-nestjs)):
 
 ```sh
 cd ~/code/my-project
