@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 rust-version = "1.89"
 license = "MIT OR Apache-2.0"
@@ -15,12 +15,12 @@ authors = ["Brokspace contributors"]
 # Internal crates. `brok-sdk` lives in its own repository and comes from
 # crates.io; for polyrepo development `scripts/bootstrap` patches it to the
 # sibling checkout (see CONTRIBUTING.md).
-brok-sdk = "0.1.1"
-brok-core = { version = "0.2.2", path = "crates/brok-core" }
-brok-bus = { version = "0.2.2", path = "crates/brok-bus" }
-brok-index = { version = "0.2.2", path = "crates/brok-index", default-features = false }
-brok-shard = { version = "0.2.2", path = "crates/brok-shard" }
-brok-skills = { version = "0.2.2", path = "crates/brok-skills" }
+brok-sdk = "0.1.2"
+brok-core = { version = "0.2.3", path = "crates/brok-core" }
+brok-bus = { version = "0.2.3", path = "crates/brok-bus" }
+brok-index = { version = "0.2.3", path = "crates/brok-index", default-features = false }
+brok-shard = { version = "0.2.3", path = "crates/brok-shard" }
+brok-skills = { version = "0.2.3", path = "crates/brok-skills" }
 
 # Async runtime & plumbing
 tokio = { version = "1.47", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
