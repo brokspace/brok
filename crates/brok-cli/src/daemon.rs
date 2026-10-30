@@ -58,7 +58,7 @@ pub async fn connect(workspace: &Workspace) -> Result<(BrokClient, Inbox)> {
 /// Connects, starting the daemon in the background first when needed.
 pub async fn connect_or_start(workspace: &Workspace) -> Result<(BrokClient, Inbox)> {
     if !is_running(workspace).await {
-        ui::step("Starting brok in the background (stop it with `brok stop`)");
+        ui::note("Starting brok in the background (stop it with `brok stop`)");
         start(workspace).await?;
     }
     connect(workspace).await

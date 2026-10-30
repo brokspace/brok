@@ -33,6 +33,9 @@ pub enum Command {
         /// LLM provider from `llm.providers` in brok.yml.
         #[arg(short, long)]
         provider: Option<String>,
+        /// Stream JSON events, one per line (see `brok ask --json`).
+        #[arg(long)]
+        json: bool,
     },
     /// Create a new skill in `.brokspace/skills/` (or `--dir`).
     New {
@@ -77,7 +80,7 @@ pub async fn run(cwd: &Path, command: Command) -> Result<()> {
             println!("{}", skill.body);
             Ok(())
         }
-        Command::Run { name, input, provider } => {
+        Command::Run { name, input, provider, json } => {
             let skill = catalog.require(&name)?;
             let (client, _inbox) = daemon::connect_or_start(&workspace).await?;
             let prompt = if input.is_empty() {
@@ -95,7 +98,7 @@ pub async fn run(cwd: &Path, command: Command) -> Result<()> {
                 }),
                 history: Vec::new(),
             };
-            super::ask::stream(&client, &request).await.map(drop)
+            super::ask::answer(&client, &request, super::ask::Output::text_or_json(json)).await.map(drop)
         }
         Command::New { name, user_invoked, dir } => {
             let parent = dir.unwrap_or_else(|| brok_skills::workspace_skills_dir(&workspace));

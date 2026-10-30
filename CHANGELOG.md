@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- JSON output for editors and scripts: `brok status --json` (workspace,
+  daemon, index, LLM and shards in one document; `{"initialized": false}`
+  outside a workspace) and `--json` on `brok ask`, `brok review` and
+  `brok skill run`, streaming one event per line (`chunk`, then `done` with
+  the sources). See docs/integrations.md.
+- `brok ask --history <file>`: follow-up questions with the conversation so
+  far, for chat interfaces built on the CLI.
+
+### Fixed
+
+- "Starting brok in the background" goes to stderr, so `brok ask ... > file`
+  and JSON readers get only the answer on stdout.
+
 ## [0.2.3] - 2026-10-30
 
 ### Changed

@@ -29,6 +29,9 @@ pub struct ReviewArgs {
     /// LLM provider from `llm.providers` in brok.yml.
     #[arg(short, long)]
     provider: Option<String>,
+    /// Stream JSON events, one per line (see `brok ask --json`).
+    #[arg(long)]
+    json: bool,
 }
 
 /// Arguments of `brok commit`.
@@ -54,7 +57,13 @@ pub async fn review(cwd: &Path, args: ReviewArgs) -> Result<()> {
     };
     let diff = git(cwd, &diff_args)?;
     if diff.trim().is_empty() {
-        ui::step(&format!("Nothing to review: {what} are empty."));
+        let message = format!("Nothing to review: {what} are empty.");
+        if args.json {
+            println!("{}", serde_json::json!({ "type": "chunk", "text": message }));
+            println!("{}", serde_json::json!({ "type": "done", "sources": [] }));
+        } else {
+            ui::step(&message);
+        }
         return Ok(());
     }
     let (diff, truncated) = truncate(&diff, PROMPT_BUDGET - 600);
@@ -69,7 +78,7 @@ pub async fn review(cwd: &Path, args: ReviewArgs) -> Result<()> {
         skill: Some(skill),
         history: Vec::new(),
     };
-    ask::stream(&client, &request).await.map(drop)
+    ask::answer(&client, &request, Output::text_or_json(args.json)).await.map(drop)
 }
 
 pub async fn commit(cwd: &Path, args: CommitArgs) -> Result<()> {

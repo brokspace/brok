@@ -25,6 +25,12 @@ pub fn step(message: &str) {
     println!("{} {message}", style("•").cyan());
 }
 
+/// Like [`step`], on stderr: for side notes that are not the command's
+/// output (stdout may be piped or parsed as JSON).
+pub fn note(message: &str) {
+    eprintln!("{} {message}", style("•").cyan());
+}
+
 /// Prints a dimmed hint.
 pub fn hint(message: &str) {
     println!("  {}", style(message).dim());
