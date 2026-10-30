@@ -150,6 +150,13 @@ switches are picked up within seconds.
 | Rebuild the index from scratch | `brok index --rebuild` |
 | Tab completion | `brok completions bash >> ~/.bashrc` (also zsh, fish, powershell) |
 
+**About AI reviews.** With a local 7b model, `brok review` is a quick first
+pass: it catches slips you would rather not push, but it also gets things
+wrong (we have seen it invent a missing validation). Read its findings as
+questions, not verdicts. For a review you want to rely on, use a 14b model
+or a hosted one for that run: `brok review -p anthropic` (see
+[Configure](#6-configure) for API keys).
+
 Inside `brok chat`: `/skill grill-me` applies a skill to the conversation,
 `/clear` forgets it, `/exit` leaves.
 
