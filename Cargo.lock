@@ -736,6 +736,8 @@ dependencies = [
 [[package]]
 name = "brok-sdk"
 version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "298e542c5ad23cddc9f337ca4dda54915687e396597cf8eed80ed7838b14ed92"
 dependencies = [
  "bytes",
  "futures-util",
@@ -1286,6 +1288,12 @@ name = "daachorse"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db756b5eb7d81d31f31f660f4132f8cf5698de52fca144c143d0ae0cbb5f2e06"
+
+[[package]]
+name = "daachorse"
+version = "3.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5614204febbc33cc07a2806aa6440b904ac012b68eecc37f4493ea4a76455a3d"
 
 [[package]]
 name = "darling"
@@ -2250,9 +2258,9 @@ dependencies = [
 
 [[package]]
 name = "fancy-regex"
-version = "0.14.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e24cb5a94bcae1e5408b0effca5cd7172ea3c5755049c5f3af4cd283a165298"
+checksum = "72cf461f865c862bb7dc573f643dd6a2b6842f7c30b07882b56bd148cc2761b8"
 dependencies = [
  "bit-set",
  "regex-automata",
@@ -4069,7 +4077,7 @@ dependencies = [
  "anyhow",
  "byteorder",
  "csv",
- "daachorse",
+ "daachorse 2.1.1",
  "kanaria",
  "lindera-dictionary",
  "log",
@@ -4096,7 +4104,7 @@ dependencies = [
  "anyhow",
  "byteorder",
  "csv",
- "daachorse",
+ "daachorse 2.1.1",
  "derive_builder",
  "encoding_rs",
  "encoding_rs_io",
@@ -6348,13 +6356,13 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tokenizers"
-version = "0.22.2"
+version = "0.23.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b238e22d44a15349529690fb07bd645cf58149a1b1e44d6cb5bd1641ff1a6223"
+checksum = "7afbf6e88718afcc138bad01d6ccc3051dbbc3b2ce9793d8b8a3aeb610969cfc"
 dependencies = [
  "ahash",
- "aho-corasick",
  "compact_str",
+ "daachorse 3.0.3",
  "dary_heap",
  "derive_builder",
  "esaxx-rs",
