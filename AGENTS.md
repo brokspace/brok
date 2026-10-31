@@ -52,6 +52,32 @@ Before calling work done, run fmt, clippy (`-D warnings`) and tests for **both**
 - Commit messages and PR titles follow Conventional Commits with the crate as scope: `feat(index): ...`, `fix(bus): ...`.
 - No em-dashes in prose (docs, skills, changelog, comments). Rewrite the sentence with a comma, colon or period instead.
 
+## Git workflow
+
+Every change reaches `main` through `staging`, the default branch:
+
+```text
+your branch --PR, squash--> staging --release PR, merge commit--> main --> tag
+```
+
+1. Branch from staging: `git fetch origin && git switch -c <type>/<topic> origin/staging` (for example `feat/kotlin-chunker`, `fix/empty-config`).
+2. Commit in small steps with Conventional Commits. End every commit message with a `Co-Authored-By:` trailer naming the agent, for example `Co-Authored-By: Claude <noreply@anthropic.com>`: the PR gets the `ai-agent` label from it.
+3. Before pushing, run the fmt, clippy and test commands from "Build and test" above.
+4. Push, open the PR against staging with the template filled in, and turn on auto-merge:
+
+   ```sh
+   git push -u origin HEAD
+   gh pr create --base staging --fill
+   gh pr merge --auto --squash
+   ```
+
+   The PR merges itself once `ubuntu-latest (default)`, `ubuntu-latest (lean)`, `macos-latest (default)`, `macos-latest (lean)`, `windows-latest (default)`, `windows-latest (lean)`, `MSRV (1.89, lean)` and `policy / title` pass and review conversations are resolved. No approval is needed.
+5. A check failed? Read it (`gh pr checks --watch`, `gh run view --log-failed`), fix it on the same branch and push; auto-merge stays on. Cannot fix it? Say what you tried in a PR comment and stop. Never weaken or skip a check to get green.
+
+Never push to `staging` or `main` (both reject it), force-push a branch someone else pushed to, open or merge PRs into `main`, or merge with `--admin`. The release PR into `main` is opened by the Promote workflow and merged by a maintainer.
+
+Do not commit a `Cargo.lock` change that only adds `[[patch.unused]]`: it comes from the local `../.cargo/config.toml` patch, and CI rejects it. Restore the file (`git restore Cargo.lock`) before committing.
+
 ## Skills
 
 Built-in skills under `skills/` use the Agent Skills format (`<name>/SKILL.md` with `name` and `description` frontmatter, plus `agents/openai.yaml`). A skill is either **user-invoked** (`disable-model-invocation: true`, the human types `/name`) or **model-invoked** (the agent may reach for it on its own). Whenever you add, rename or remove a skill:
