@@ -61,9 +61,9 @@ sysinfo = { version = "0.36", default-features = false, features = ["system"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "native-tls", "http2", "charset"] }
 
 # Storage & search
-arrow-array = "58"
+arrow-array = "60"
 arrow-buffer = "58"
-arrow-ipc = "58"
+arrow-ipc = "60"
 arrow-schema = "58"
 # `remote` is required only because lancedb 0.40 references `Error::Http`
 # outside its feature gate (src/job.rs); drop it once fixed upstream.
