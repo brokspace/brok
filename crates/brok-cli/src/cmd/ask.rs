@@ -4,10 +4,11 @@ use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use brok_sdk::payload::{AskChunk, AskDone, AskFailed, AskRequest};
 use brok_sdk::{BrokClient, Event};
 use console::style;
+use serde_json::json;
 
 use crate::{daemon, ui};
 
@@ -23,6 +24,13 @@ pub struct Args {
     /// Number of context chunks to retrieve.
     #[arg(short, long)]
     context: Option<usize>,
+    /// Earlier turns of the conversation: a JSON file holding
+    /// `[{"role": "user" | "assistant", "content": "..."}]`.
+    #[arg(long, value_name = "FILE")]
+    history: Option<std::path::PathBuf>,
+    /// Stream JSON events, one per line, instead of text (for editors and scripts).
+    #[arg(long)]
+    json: bool,
 }
 
 /// Time to wait for the first answer fragment: a 7B model on a laptop CPU
@@ -34,15 +42,22 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(180);
 
 pub async fn run(cwd: &Path, args: Args) -> Result<()> {
     let workspace = super::workspace(cwd)?;
+    let history = match &args.history {
+        Some(path) => {
+            let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+            serde_json::from_str(&text).with_context(|| format!("{}: expected [{{role, content}}]", path.display()))?
+        }
+        None => Vec::new(),
+    };
     let (client, _inbox) = daemon::connect_or_start(&workspace).await?;
     let request = AskRequest {
         prompt: args.prompt.join(" "),
         provider: args.provider,
         context_chunks: args.context,
         skill: None,
-        history: Vec::new(),
+        history,
     };
-    stream(&client, &request).await.map(drop)
+    answer(&client, &request, Output::text_or_json(args.json)).await.map(drop)
 }
 
 /// Where answer fragments go.
@@ -50,8 +65,19 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
 pub enum Output {
     /// Printed as they arrive; sources go to stderr.
     Terminal,
+    /// JSON events on stdout, one per line: `{"type":"chunk","text":...}`
+    /// while the answer streams, then `{"type":"done","provider":...,
+    /// "model":...,"sources":[...]}`. Failures exit non-zero, message on stderr.
+    Json,
     /// Only collected.
     Silent,
+}
+
+impl Output {
+    /// `Json` when asked for, `Terminal` otherwise.
+    pub fn text_or_json(json: bool) -> Self {
+        if json { Output::Json } else { Output::Terminal }
+    }
 }
 
 /// Sends `request` to the agent and streams the answer to stdout (sources
@@ -93,15 +119,27 @@ async fn receive(
             if let Some(spinner) = waiting.take() {
                 spinner.finish_and_clear();
             }
-            text.push_str(&chunk.text);
-            if output == Output::Terminal {
-                stdout.write_all(chunk.text.as_bytes())?;
-                stdout.flush()?;
+            match output {
+                Output::Terminal => stdout.write_all(chunk.text.as_bytes())?,
+                Output::Json => writeln!(stdout, "{}", json!({ "type": "chunk", "text": chunk.text }))?,
+                Output::Silent => {}
             }
+            stdout.flush()?;
+            text.push_str(&chunk.text);
         } else if let Ok(done) = reply.decode::<AskDone>() {
-            if output == Output::Terminal {
-                writeln!(stdout)?;
-                print_sources(&done);
+            match output {
+                Output::Terminal => {
+                    writeln!(stdout)?;
+                    print_sources(&done);
+                }
+                Output::Json => {
+                    let event = json!({
+                        "type": "done", "provider": done.provider, "model": done.model, "sources": done.sources,
+                    });
+                    writeln!(stdout, "{event}")?;
+                    stdout.flush()?;
+                }
+                Output::Silent => {}
             }
             return Ok(text);
         } else if let Ok(failed) = reply.decode::<AskFailed>() {

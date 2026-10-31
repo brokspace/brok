@@ -59,6 +59,33 @@ llm:
     company:  { base_url: https://llm.internal.example.com/v1, model: gpt-oss-20b, api_key_env: COMPANY_LLM_KEY }
 ```
 
+## Editors and scripts: JSON output
+
+Editors (the Brokspace IDE among them), scripts and CI read brok through
+`--json`. Shapes are stable within a minor version.
+
+| Command | Output |
+|---|---|
+| `brok status --json` | One document: `version`, `initialized`, `root`, `daemon.running`, `backends`, `embeddings`, `llm` (`provider`, `model`, `base_url`), `index[]` (`tier`, `path`, `files`, `chunks`, `backend`, `semantic`), `shards[]` (`name`, `version`, `description`, `state`, `source`). Outside a workspace: `{"version": ..., "initialized": false}`. |
+| `brok search <query> --json` | One document: `hits[]` with `path`, `start_line`, `end_line`, `kind`, `symbol`, `score`, `content`. |
+| `brok skill list --json` | One array: `name`, `description`, `user_invoked`, `source`, `bucket` per skill. |
+| `brok ask ... --json`, `brok review --json`, `brok skill run ... --json` | A stream, one JSON event per line (see below). |
+
+Streaming events:
+
+```json
+{"type": "chunk", "text": "Refresh tokens rotate on every "}
+{"type": "chunk", "text": "use..."}
+{"type": "done", "provider": "ollama", "model": "qwen2.5-coder:7b",
+ "sources": [{"path": "src/auth/auth.service.ts", "start_line": 42, "end_line": 77, "symbol": "refresh"}]}
+```
+
+A failure ends the stream with a non-zero exit code and the message on
+stderr. Follow-up questions pass the conversation so far:
+`brok ask --json --history turns.json "and where is it tested?"`, where
+`turns.json` holds `[{"role": "user", "content": "..."}, {"role":
+"assistant", "content": "..."}]`.
+
 ## Shards: integrations you build
 
 When something is specific to your team (a ticketing system, a deploy
