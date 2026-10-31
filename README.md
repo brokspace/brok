@@ -1,6 +1,10 @@
-# Brokspace
-
-**Your workspace, understood. Local-first search, agents and skills for every developer.**
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/brokspace-on-dark.svg">
+    <img src=".github/assets/brokspace.svg" alt="Brokspace" height="88">
+  </picture>
+</p>
+<p align="center"><b>Local-first search, agents and skills for every developer.</b></p>
 
 Brokspace (`brok`) makes any development workspace, from a side project to a
 corporate monorepo with dozens of submodules, instantly searchable and
