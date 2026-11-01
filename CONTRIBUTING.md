@@ -128,11 +128,17 @@ Handy while developing shards: `brok run -v` in one terminal and
 
 ## Releasing (maintainers)
 
-1. If `brok-sdk` changed: bump its version, tag `vX.Y.Z` in brok-sdk; its
-   Release workflow publishes it to crates.io.
-2. Update `CHANGELOG.md`, bump `version` in `Cargo.toml` (workspace and the
-   internal dependency versions), push, wait for green CI, then tag
-   `vX.Y.Z`. The Release workflow builds binaries for Linux, macOS and
+Releases are cut from `main`, which only moves through the release PR from
+`staging` (see [Branches and pull requests](https://github.com/brokspace/.github/blob/main/CONTRIBUTING.md#branches-and-pull-requests)).
+Tag with `git fetch origin && git tag vX.Y.Z origin/main && git push origin vX.Y.Z`.
+
+1. If `brok-sdk` changed: bump its version in a PR to `staging`, merge
+   brok-sdk's release PR into `main`, then tag `vX.Y.Z` there; its Release
+   workflow publishes it to crates.io.
+2. Update `CHANGELOG.md` and bump `version` in `Cargo.toml` (workspace and
+   the internal dependency versions) in a PR to `staging`. Once it is on
+   `staging`, merge the release PR ("release: promote staging to main") with
+   a merge commit, then tag `vX.Y.Z` on `main`. The Release workflow builds binaries for Linux, macOS and
    Windows, attaches them with `.sha256` files and publishes the release
    (the install scripts always fetch the latest one).
 3. Publish the crates: `gh workflow run publish-crates.yml -f tag=vX.Y.Z`
