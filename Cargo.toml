@@ -68,7 +68,7 @@ arrow-schema = "58"
 # `remote` is required only because lancedb 0.40 references `Error::Http`
 # outside its feature gate (src/job.rs); drop it once fixed upstream.
 # See docs/adr/0007-lancedb-remote-feature-workaround.md.
-lancedb = { version = "0.40", features = ["remote"] }
+lancedb = { version = "0.41", features = ["remote"] }
 
 # ML / parsing (optional native backends)
 ort = "=2.0.0-rc.15"
