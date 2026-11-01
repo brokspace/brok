@@ -634,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "brok-bus"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "brok-sdk",
  "futures",
@@ -651,7 +651,7 @@ dependencies = [
 
 [[package]]
 name = "brok-cli"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "brok-bus",
@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "brok-core"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "brok-sdk",
  "dirs",
@@ -695,7 +695,7 @@ dependencies = [
 
 [[package]]
 name = "brok-index"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "arrow-array",
@@ -753,7 +753,7 @@ dependencies = [
 
 [[package]]
 name = "brok-shard"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "brok-core",
@@ -774,7 +774,7 @@ dependencies = [
 
 [[package]]
 name = "brok-skills"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "brok-core",
