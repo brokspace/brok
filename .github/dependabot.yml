@@ -9,6 +9,10 @@ updates:
         patterns: ["arrow*", "lancedb", "lance*"]
       tree-sitter:
         patterns: ["tree-sitter*"]
+    ignore:
+      # arrow must match the version lancedb is built on; it moves with lancedb.
+      - dependency-name: "arrow*"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
