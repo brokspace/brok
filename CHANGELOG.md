@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-11-01
+
 ### Added
 
 - JSON output for editors and scripts: `brok status --json` (workspace,
