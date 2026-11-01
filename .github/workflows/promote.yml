@@ -1,0 +1,14 @@
+name: Promote
+
+on:
+  push:
+    branches: [staging]
+
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+
+jobs:
+  promote:
+    uses: brokspace/.github/.github/workflows/promote.yml@main
