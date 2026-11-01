@@ -15,9 +15,10 @@
 
 ## Checklist
 
-- [ ] PR title follows Conventional Commits (`feat(index): ...`, `fix(bus): ...`)
+- [ ] Targets `staging`; PR title follows Conventional Commits (`feat(index): ...`, `fix(bus): ...`)
 - [ ] `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass
 - [ ] User-visible changes are in `CHANGELOG.md` (Unreleased) and the docs
 - [ ] Protocol, manifest or config changes are backwards compatible, or an ADR / issue discusses the migration
 - [ ] Added, renamed or removed skills are reflected in `skills/README.md` and the bucket `README.md`
 - [ ] Both builds pass when relevant: default features and `--no-default-features`
+- [ ] Written with a coding agent? Its commits carry a `Co-Authored-By:` trailer, and a human read the diff
