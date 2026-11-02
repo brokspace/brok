@@ -22,12 +22,15 @@ For each agent it does two things.
 
 **1. MCP server.** Registers `brok mcp` (a stdio
 [Model Context Protocol](https://modelcontextprotocol.io) server) so the
-agent gets two tools:
+agent gets these tools:
 
 | Tool | What it does |
 |---|---|
-| `brok_search` | Hybrid search over the local index; returns whole functions/classes with `path:start-end` |
-| `brok_status` | What is indexed and whether `brok run` is active |
+| `brok_search` | Hybrid search over the local index, the [linked workspaces](memory.md#linked-workspaces) and the memories; returns whole functions/classes with `path:start-end` |
+| `brok_status` | What is indexed and linked, how many memories, and whether `brok run` is active |
+| `brok_memory_save` | Saves a [memory](memory.md) (decision, fact, note, handoff) for later sessions |
+| `brok_memory_search` | Searches the memories of this workspace, your global ones and the linked workspaces' |
+| `brok_memory_recent` | The latest memories: agents call it at the start of a task to catch up |
 
 | Agent | File written |
 |---|---|
@@ -66,9 +69,14 @@ Editors (the Brokspace IDE among them), scripts and CI read brok through
 
 | Command | Output |
 |---|---|
-| `brok status --json` | One document: `version`, `initialized`, `root`, `daemon.running`, `backends`, `embeddings`, `llm` (`provider`, `model`, `base_url`), `index[]` (`tier`, `path`, `files`, `chunks`, `backend`, `semantic`), `shards[]` (`name`, `version`, `description`, `state`, `source`). Outside a workspace: `{"version": ..., "initialized": false}`. |
-| `brok search <query> --json` | One document: `hits[]` with `path`, `start_line`, `end_line`, `kind`, `symbol`, `score`, `content`. |
+| `brok status --json` | One document: `version`, `initialized`, `root`, `daemon.running`, `backends`, `embeddings`, `llm` (`provider`, `model`, `base_url`), `index[]` (`tier`, `path`, `files`, `chunks`, `backend`, `semantic`), `shards[]` (`name`, `version`, `description`, `state`, `source`), `links[]` (as `brok link list --json`), `memory` (`enabled`, `sessions`, `global`, `counts.private`, `counts.shared`, `counts.global`). Outside a workspace: `{"version": ..., "initialized": false}`. |
+| `brok search <query> --json` | One document: `hits[]` with `path`, `start_line`, `end_line`, `kind`, `symbol`, `score`, `content`, `partition` (`@<link>` for linked workspaces, `memory` for memories). |
 | `brok skill list --json` | One array: `name`, `description`, `user_invoked`, `source`, `bucket` per skill. |
+| `brok memory list --json` | One array of memories: `id`, `title`, `kind`, `scope`, `tags`, `created`, `updated`, `source`, `body`, `path`. `brok memory add/show ... --json` print one. |
+| `brok memory search <query> --json` | One array of hits, shaped like `brok search` hits (`kind: "memory"`, the title as `symbol`). |
+| `brok link list --json` | One array: `name`, `kind` (`local`, `git`), `root`, `path`, `git`, `branch`, `description`, `memory`, `index` (`own`, `managed`), `exists`, `files`, `chunks`, `error`. |
+| `brok link add/remove/sync ... --json` | One document (`sync`: one result per link with `commit`, `files_indexed` or `error`). |
+| `brok config get [key] --json` | The configuration (or one key) as JSON; change it with `brok config set <key> <value>`. |
 | `brok ask ... --json`, `brok review --json`, `brok skill run ... --json` | A stream, one JSON event per line (see below). |
 
 Streaming events:

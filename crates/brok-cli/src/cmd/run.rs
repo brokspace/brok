@@ -57,6 +57,7 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
     let index_shutdown = CancellationToken::new();
     let mut tasks = JoinSet::new();
     start_index_service(&workspace, &bus, &index_shutdown, &mut tasks).await;
+    catch_up_links(&workspace);
 
     // Shards.
     let shard_shutdown = CancellationToken::new();
@@ -145,6 +146,37 @@ async fn start_control_service(bus: &Bus, stop: CancellationToken) {
                 let reply = DaemonStatusReply { pid: std::process::id(), identities: bus.stats().await.identities };
                 let _ = client.reply(&event, &reply).await;
             }
+        }
+    });
+}
+
+/// Brings the indexes brok keeps for local links (directories without a
+/// Brokspace of their own) up to date, in the background: they are not
+/// watched, so changes there are picked up at every start. Git links are
+/// only fetched by `brok link sync`.
+fn catch_up_links(workspace: &Workspace) {
+    let managed: Vec<String> = brok_core::Link::all(workspace)
+        .into_iter()
+        .filter(|l| l.kind == brok_core::links::LinkKind::Local && l.index() == brok_core::links::LinkIndex::Managed)
+        .map(|l| l.name)
+        .collect();
+    if managed.is_empty() {
+        return;
+    }
+    let workspace = workspace.clone();
+    tokio::spawn(async move {
+        match super::link::sync(&workspace, &managed, false).await {
+            Ok(results) => {
+                for result in results {
+                    match result["error"].as_str() {
+                        Some(error) => tracing::warn!(link = %result["name"], %error, "linked workspace not indexed"),
+                        None => {
+                            tracing::info!(link = %result["name"], indexed = %result["files_indexed"], "linked workspace up to date")
+                        }
+                    }
+                }
+            }
+            Err(e) => tracing::warn!(error = %e, "cannot update linked workspaces"),
         }
     });
 }

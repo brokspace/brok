@@ -7,6 +7,16 @@ workspace:
   # Index git submodules and nested git repositories (a folder of repos) as
   # independent "hot" partitions.
   submodules: true
+  # Workspaces this one depends on (another service, a shared library): their
+  # code and memories are searched too. A `path` on this machine, or a `git`
+  # URL that brok clones (`brok link sync` updates it). Manage with `brok link`.
+  #   checkout:
+  #     path: ../checkout
+  #     description: Carts and payments; the user service calls its /orders API.
+  #   payments:
+  #     git: https://github.com/acme/payments.git
+  #     branch: main
+  links: {}
 
 index:
   # Glob patterns, relative to the workspace root. .gitignore is always honored.
@@ -48,6 +58,19 @@ search:
   limit: 8
   # Score multiplier for results outside the partition you are working in.
   cold_weight: 0.85
+  # Score multiplier for results from linked workspaces.
+  link_weight: 0.8
+
+memory:
+  # Remember decisions, facts, notes and chat sessions between sessions
+  # (`brok memory`). Private memories live in .brokspace/memory/, shared ones
+  # in .brokspace-memory/ (commit it), global ones in your user configuration
+  # directory, for every workspace.
+  enabled: true
+  # Save IDE chat sessions as memories.
+  sessions: true
+  # Search your global memories here too.
+  global: true
 
 llm:
   # Provider used by `brok ask` unless --provider is given.

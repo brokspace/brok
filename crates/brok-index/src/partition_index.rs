@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::bm25::Bm25Index;
 use crate::store::{ChunkStore, resolve_backend};
 
-const MANIFEST_FILE: &str = "files.json";
+pub(crate) const MANIFEST_FILE: &str = "files.json";
 const BM25_FILE: &str = "bm25.bin";
 const MANIFEST_VERSION: u32 = 1;
 
@@ -110,6 +110,11 @@ impl PartitionIndex {
         let store = ChunkStore::open(&dir, backend, embedding.as_ref().map(|e| e.dims)).await?;
         let bm25 = Bm25Index::load(&dir.join(BM25_FILE));
         Ok(Self { partition, dir, store, bm25, manifest })
+    }
+
+    /// Embedding model and dimensions the stored vectors were made with.
+    pub fn embedding(&self) -> Option<&EmbeddingInfo> {
+        self.manifest.embedding.as_ref()
     }
 
     /// Recorded state of every indexed file.

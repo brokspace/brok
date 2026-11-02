@@ -16,6 +16,8 @@ use sha2::{Digest, Sha256};
 
 use crate::chunk::{Chunk, ChunkOptions, chunk_file};
 use crate::embed::{EmbedKind, Embedder};
+use crate::links::{LinkStatus, LinkedIndex};
+use crate::memory::MemorySearch;
 use crate::partition_index::{EmbeddingInfo, FileRecord, PartitionIndex};
 
 /// Files read, hashed and chunked per batch (bounds memory on big repos).
@@ -107,6 +109,9 @@ pub struct Index {
     pub(crate) partitions: PartitionMap,
     pub(crate) parts: Vec<PartitionIndex>,
     pub(crate) embedder: Option<Arc<dyn Embedder>>,
+    /// Linked workspaces, opened on the first search.
+    pub(crate) links: tokio::sync::Mutex<Vec<LinkedIndex>>,
+    pub(crate) memory: MemorySearch,
     filter: FileFilter,
     _lock: Option<File>,
 }
@@ -138,6 +143,9 @@ impl Index {
             parts.push(part);
         }
 
+        let links = LinkedIndex::all(workspace);
+        let shown: Vec<_> = links.iter().map(|l| (l.link.clone(), l.prefix.clone())).collect();
+        let memory = MemorySearch::new(workspace, &shown);
         Ok(Self {
             root: workspace.root().to_path_buf(),
             filter: FileFilter::new(&config.index)?,
@@ -145,6 +153,8 @@ impl Index {
             partitions,
             parts,
             embedder,
+            links: tokio::sync::Mutex::new(links),
+            memory,
             _lock: lock,
         })
     }
@@ -203,7 +213,9 @@ impl Index {
         for rel in paths {
             let Some(i) = self.part_index_for(&rel) else { continue };
             let entry = work.entry(i).or_default();
-            let allowed = self.filter.allows(&rel) && !brok_core::fsutil::in_managed_dir(&self.root, &rel);
+            let allowed = self.filter.allows(&rel)
+                && !brok_core::fsutil::in_managed_dir(&self.root, &rel)
+                && !is_shared_memory(&rel);
             match FileMeta::stat(&self.root, &rel).filter(|_| allowed) {
                 Some(meta) => entry.0.push(meta),
                 None if self.parts[i].files().contains_key(&rel) => entry.1.push(rel),
@@ -233,6 +245,16 @@ impl Index {
             });
         }
         Ok(out)
+    }
+
+    /// Linked workspaces and whether they can be searched.
+    pub async fn link_status(&self) -> Vec<LinkStatus> {
+        let mut links = self.links.lock().await;
+        let mut out = Vec::with_capacity(links.len());
+        for link in links.iter_mut() {
+            out.push(link.status(&self.config).await);
+        }
+        out
     }
 
     /// The loaded embedder, if any.
@@ -411,7 +433,11 @@ fn walk(root: &Path) -> Result<Vec<FileMeta>> {
         .require_git(false)
         .follow_links(false)
         .filter_entry(|entry| {
-            let skip_name = matches!(entry.file_name().to_str(), Some(".git" | ".brokspace"));
+            // Shared memories are searched as memories, not as code.
+            let skip_name = matches!(
+                entry.file_name().to_str(),
+                Some(".git" | ".brokspace" | brok_core::workspace::SHARED_MEMORY_DIR)
+            );
             // Folders brok generated for other tools (exported skills) are not workspace knowledge.
             let generated = entry.file_type().is_some_and(|t| t.is_dir())
                 && entry.path().join(brok_core::fsutil::MANAGED_MARKER).is_file();
@@ -466,6 +492,10 @@ fn read_and_chunk(
     let Ok(text) = String::from_utf8(bytes) else { return Outcome::Skipped { rel: file.rel } };
     let chunks = chunk_file(&file.rel, &text, &hash, options);
     Outcome::Chunked { record: record(u32::try_from(chunks.len()).unwrap_or(u32::MAX)), rel: file.rel, chunks }
+}
+
+fn is_shared_memory(rel: &str) -> bool {
+    rel.split('/').next() == Some(brok_core::workspace::SHARED_MEMORY_DIR)
 }
 
 fn normalize(path: &str) -> String {
