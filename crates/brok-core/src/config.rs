@@ -28,6 +28,8 @@ pub struct BrokConfig {
     pub embeddings: EmbeddingsConfig,
     /// Search tuning.
     pub search: SearchConfig,
+    /// Memories kept between sessions.
+    pub memory: MemoryConfig,
     /// LLM routing (OpenAI-compatible providers).
     pub llm: LlmConfig,
     /// Index mirroring.
@@ -44,6 +46,7 @@ impl Default for BrokConfig {
             index: IndexConfig::default(),
             embeddings: EmbeddingsConfig::default(),
             search: SearchConfig::default(),
+            memory: MemoryConfig::default(),
             llm: LlmConfig::default(),
             sync: SyncConfig::default(),
             shards: BTreeMap::new(),
@@ -57,11 +60,77 @@ impl Default for BrokConfig {
 pub struct WorkspaceConfig {
     /// Index git submodules and nested git repositories as hot partitions.
     pub submodules: bool,
+    /// Other workspaces this one depends on, keyed by name: their code and
+    /// memories are searched too.
+    pub links: BTreeMap<String, LinkConfig>,
 }
 
 impl Default for WorkspaceConfig {
     fn default() -> Self {
-        Self { submodules: true }
+        Self { submodules: true, links: BTreeMap::new() }
+    }
+}
+
+/// `workspace.links.<name>`: a workspace on disk (`path`) or a git
+/// repository brok clones (`git`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LinkConfig {
+    /// Directory of the workspace, absolute or relative to this workspace's root.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Git URL, cloned into `.brokspace/links/<name>/src`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git: Option<String>,
+    /// Branch of `git` (the remote's default branch when absent).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// What it is and how this workspace uses it (given to the LLM).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Search its memories too (its shared ones, and its private ones when it
+    /// is a Brokspace workspace on this machine).
+    #[serde(skip_serializing_if = "is_true")]
+    pub memory: bool,
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
+impl Default for LinkConfig {
+    fn default() -> Self {
+        Self { path: None, git: None, branch: None, description: None, memory: true }
+    }
+}
+
+impl LinkConfig {
+    /// A link to a directory.
+    pub fn local(path: impl Into<String>) -> Self {
+        Self { path: Some(path.into()), ..Self::default() }
+    }
+
+    /// A link to a git repository.
+    pub fn git(url: impl Into<String>, branch: Option<String>) -> Self {
+        Self { git: Some(url.into()), branch, ..Self::default() }
+    }
+}
+
+/// `memory:` section.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MemoryConfig {
+    /// Search memories and let tools save them.
+    pub enabled: bool,
+    /// Save IDE chat sessions as memories.
+    pub sessions: bool,
+    /// Include the user's global memories, shared by every workspace.
+    pub global: bool,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self { enabled: true, sessions: true, global: true }
     }
 }
 
@@ -188,11 +257,13 @@ pub struct SearchConfig {
     pub limit: usize,
     /// Weight applied to partitions other than the focused (hot) one.
     pub cold_weight: f32,
+    /// Weight applied to results from linked workspaces.
+    pub link_weight: f32,
 }
 
 impl Default for SearchConfig {
     fn default() -> Self {
-        Self { limit: 8, cold_weight: 0.85 }
+        Self { limit: 8, cold_weight: 0.85, link_weight: 0.8 }
     }
 }
 
@@ -369,6 +440,24 @@ impl BrokConfig {
         if !(0.0..=1.0).contains(&self.search.cold_weight) {
             errors.push("search.cold_weight must be between 0 and 1".into());
         }
+        if !(0.0..=1.0).contains(&self.search.link_weight) {
+            errors.push("search.link_weight must be between 0 and 1".into());
+        }
+        for (name, link) in &self.workspace.links {
+            if !is_link_name(name) {
+                errors.push(format!(
+                    "workspace.links: `{name}` is not a valid name (letters, digits, `-`, `_` and `.`, not starting with `.`)"
+                ));
+            }
+            match (&link.path, &link.git) {
+                (Some(_), Some(_)) => errors.push(format!("workspace.links.{name}: set `path` or `git`, not both")),
+                (None, None) => errors.push(format!("workspace.links.{name}: `path` or `git` is required")),
+                (Some(_), None) if link.branch.is_some() => {
+                    errors.push(format!("workspace.links.{name}: `branch` only applies to `git` links"));
+                }
+                _ => {}
+            }
+        }
         if self.sync.backend.is_object_store() && self.sync.remote.is_none() {
             errors.push("sync.remote is required for object storage backends (run `brok setup`)".into());
         }
@@ -384,6 +473,14 @@ impl BrokConfig {
     pub fn shard_settings(&self, name: &str) -> Value {
         self.shards.get(name).map(|entry| entry.settings.clone()).unwrap_or(Value::Null)
     }
+}
+
+/// Whether `name` can name a link (it becomes a directory name).
+pub fn is_link_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && !name.starts_with('.')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
 /// Copies the comments of `template` into `yaml` (block-style YAML as serde
@@ -542,6 +639,23 @@ mod tests {
         assert!(err.contains("llm.default"), "{err}");
         let err = BrokConfig::from_yaml("sync:\n  backend: s3\n").unwrap_err().to_string();
         assert!(err.contains("sync.remote"), "{err}");
+    }
+
+    #[test]
+    fn links() {
+        let config = BrokConfig::from_yaml(
+            "workspace:\n  links:\n    checkout:\n      path: ../checkout\n    payments:\n      git: https://example.com/p.git\n      branch: main\n      memory: false\n",
+        )
+        .unwrap();
+        assert_eq!(config.workspace.links["checkout"], LinkConfig::local("../checkout"));
+        assert!(!config.workspace.links["payments"].memory);
+
+        let err = BrokConfig::from_yaml("workspace:\n  links:\n    x:\n      path: a\n      git: b\n").unwrap_err();
+        assert!(err.to_string().contains("not both"), "{err}");
+        let err = BrokConfig::from_yaml("workspace:\n  links:\n    x: {}\n").unwrap_err();
+        assert!(err.to_string().contains("is required"), "{err}");
+        let err = BrokConfig::from_yaml("workspace:\n  links:\n    ../x:\n      path: a\n").unwrap_err();
+        assert!(err.to_string().contains("valid name"), "{err}");
     }
 
     #[test]

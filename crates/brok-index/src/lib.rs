@@ -3,7 +3,8 @@
 //! Pipeline: walk the workspace (honoring `.gitignore`) → route each file
 //! to its partition (root or git submodule) → skip unchanged files (stat,
 //! then content hash) → cut AST-aware chunks → embed them locally → write
-//! the chunk store + BM25 index. Queries run a federated hybrid search.
+//! the chunk store + BM25 index. Queries run a federated hybrid search over
+//! the partitions, the linked workspaces and the memories.
 //!
 //! Optional native backends are behind cargo features (all on by default):
 //! `ast` (tree-sitter), `lancedb` (LanceDB store) and `onnx` (local
@@ -15,6 +16,8 @@ pub mod chunk;
 pub mod embed;
 mod index;
 pub mod language;
+mod links;
+mod memory;
 pub mod partition_index;
 pub mod schema;
 mod search;
@@ -23,6 +26,8 @@ pub mod store;
 
 pub use embed::{EmbedKind, Embedder, ModelFiles, load_embedder};
 pub use index::{Access, Index, IndexReport, PartitionStatus, Progress};
+pub use links::LinkStatus;
+pub use memory::search_memories;
 pub use search::SearchQuery;
 
 /// Names of the optional backends compiled into this build.

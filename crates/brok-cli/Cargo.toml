@@ -42,6 +42,7 @@ reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml_ng.workspace = true
 sysinfo.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
