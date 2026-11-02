@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.2.4"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.89"
 license = "MIT OR Apache-2.0"
@@ -16,11 +16,11 @@ authors = ["Brokspace contributors"]
 # crates.io; for polyrepo development `scripts/bootstrap` patches it to the
 # sibling checkout (see CONTRIBUTING.md).
 brok-sdk = "0.1.2"
-brok-core = { version = "0.2.4", path = "crates/brok-core" }
-brok-bus = { version = "0.2.4", path = "crates/brok-bus" }
-brok-index = { version = "0.2.4", path = "crates/brok-index", default-features = false }
-brok-shard = { version = "0.2.4", path = "crates/brok-shard" }
-brok-skills = { version = "0.2.4", path = "crates/brok-skills" }
+brok-core = { version = "0.3.0", path = "crates/brok-core" }
+brok-bus = { version = "0.3.0", path = "crates/brok-bus" }
+brok-index = { version = "0.3.0", path = "crates/brok-index", default-features = false }
+brok-shard = { version = "0.3.0", path = "crates/brok-shard" }
+brok-skills = { version = "0.3.0", path = "crates/brok-skills" }
 
 # Async runtime & plumbing
 tokio = { version = "1.47", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
@@ -51,13 +51,14 @@ sha2 = "0.11"
 hex = "0.4"
 getrandom = "0.4"
 globset = "0.4"
+regex = { version = "1.11", default-features = false, features = ["std", "perf", "unicode-case", "unicode-perl"] }
 ignore = "0.4"
 rayon = "1.11"
 memmap2 = "0.9"
 tempfile = "3.20"
-dirs = "6"
+dirs = "7"
 clap_complete = "4.5"
-sysinfo = { version = "0.36", default-features = false, features = ["system"] }
+sysinfo = { version = "0.38", default-features = false, features = ["system"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "native-tls", "http2", "charset"] }
 
 # Storage & search

@@ -62,6 +62,15 @@ enum Command {
     Status(cmd::status::Args),
     /// Configure the local LLM, coding agent integrations or index mirroring.
     Setup(cmd::setup::Args),
+    /// Read and change brok.yml (`brok config get search`, `brok config set search.limit 12`).
+    #[command(subcommand)]
+    Config(cmd::config::Command),
+    /// What Brokspace remembers between sessions: decisions, facts, notes, chat sessions.
+    #[command(subcommand)]
+    Memory(cmd::memory::Command),
+    /// Workspaces this one depends on (other services, libraries): searched with it.
+    #[command(subcommand)]
+    Link(cmd::link::Command),
     /// Check the installation and explain how to fix what is missing.
     Doctor(cmd::doctor::Args),
     /// Upgrade brok and brok-agent to the latest release and show what changed.
@@ -129,6 +138,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Run(args) => cmd::run::run(&cwd, args).await,
         Command::Status(args) => cmd::status::run(&cwd, args).await,
         Command::Setup(args) => cmd::setup::run(&cwd, args).await,
+        Command::Config(command) => cmd::config::run(&cwd, command).await,
+        Command::Memory(command) => cmd::memory::run(&cwd, command).await,
+        Command::Link(command) => cmd::link::run(&cwd, command).await,
         Command::Doctor(args) => cmd::doctor::run(&cwd, args).await,
         Command::Upgrade(args) => cmd::upgrade::run(&cwd, args).await,
         Command::Skill(command) => cmd::skill::run(&cwd, command).await,

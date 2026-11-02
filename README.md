@@ -30,8 +30,13 @@ $ brok search "where do we validate jwt tokens"
   indexed whole (tree-sitter), found by meaning or by name, across every
   git submodule. Works offline; works without any LLM.
 - **Your coding agent, Brokspace-aware.** `brok setup agents` gives Claude
-  Code, Cursor, VS Code / Copilot and Codex a `brok_search` tool (MCP) and a
-  set of proven engineering **skills**.
+  Code, Cursor, VS Code / Copilot and Codex `brok_search` and memory tools
+  (MCP) and a set of proven engineering **skills**.
+- **Memory that lasts.** Decisions, facts and chat sessions are remembered
+  between sessions (privately, shared with your team through git, or for all
+  your workspaces) and found with your code.
+- **Linked workspaces.** Working on the `user` service? Link the `checkout`
+  service it calls, on disk or as a git URL: answers know about both.
 - **A local LLM in one step.** `brok setup llm` sizes a model to your machine
   and wires up Ollama or LM Studio. Hosted models work too.
 - **Shards: build your own integrations.** Small event-driven programs that
@@ -116,6 +121,9 @@ your workspaces, so `brok init` in the next project takes seconds.
 | `brok status` / `brok doctor` | What is indexed and running / health check with fixes |
 | `brok upgrade [--check]` | Upgrade brok and brok-agent to the latest release, with what changed |
 | `brok index [--rebuild]` | Re-index (incremental; the daemon does it automatically) |
+| `brok memory add \| list \| search \| show \| forget` | What Brokspace remembers between sessions |
+| `brok link add \| list \| sync \| remove` | Workspaces this one depends on (a path or a git URL) |
+| `brok config get \| set \| unset` | Read and change `brok.yml` |
 | `brok setup llm \| agents \| sync` | Local LLM, coding agent integrations, index mirroring |
 | `brok skill list \| show \| run \| new \| export` | Agent skills |
 | `brok shard new \| install \| list \| info \| remove` | Shards |
@@ -130,6 +138,7 @@ your workspaces, so `brok init` in the next project takes seconds.
 |---|---|
 | **[Getting started](docs/getting-started.md)** | **Step by step: install, first workspace, daily use, configuration, troubleshooting** |
 | [Local LLM setup](docs/local-llm.md) | Ollama / LM Studio, which model fits your machine |
+| [Memory and linked workspaces](docs/memory.md) | What Brokspace remembers, and the workspaces yours depends on |
 | [Integrations](docs/integrations.md) | Coding agents (MCP + skills), LLMs, storage |
 | [Skills](docs/skills.md) | Built-in workflows, writing and sharing skills |
 | [Shards](docs/shards.md) | Build event-driven integrations, `shard.json` reference |

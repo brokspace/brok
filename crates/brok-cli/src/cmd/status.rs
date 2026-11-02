@@ -74,6 +74,34 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
         );
     }
 
+    let links = super::link::statuses(&workspace).await?;
+    if !links.is_empty() {
+        println!();
+        ui::header("Linked workspaces");
+        for link in &links {
+            let state = match &link.error {
+                Some(error) => style(error.clone()).yellow().to_string(),
+                None => format!("{} files, {} chunks", link.files, link.chunks),
+            };
+            println!("  {:<16} {:<28} {state}", link.name, link.git.as_deref().unwrap_or(&link.root));
+        }
+    }
+
+    println!();
+    ui::header("Memory");
+    if config.memory.enabled {
+        let counts = memory_counts(&workspace);
+        println!(
+            "  {} private, {} shared, {} global{}",
+            counts.0,
+            counts.1,
+            counts.2,
+            if config.memory.sessions { "" } else { " (chat sessions are not saved)" }
+        );
+    } else {
+        println!("  off (memory.enabled)");
+    }
+
     println!();
     ui::header("Shards");
     let shards = Registry::new(workspace.paths()).list()?;
@@ -119,6 +147,7 @@ async fn json_status(workspace: &Workspace) -> Result<Value> {
             })
         })
         .collect();
+    let memories = memory_counts(workspace);
     Ok(json!({
         "version": env!("CARGO_PKG_VERSION"),
         "initialized": true,
@@ -137,7 +166,22 @@ async fn json_status(workspace: &Workspace) -> Result<Value> {
         },
         "index": index,
         "shards": shards,
+        "links": super::link::statuses(workspace).await?,
+        "memory": {
+            "enabled": config.memory.enabled,
+            "sessions": config.memory.sessions,
+            "global": config.memory.global,
+            "counts": { "private": memories.0, "shared": memories.1, "global": memories.2 },
+        },
     }))
+}
+
+/// Private, shared and global memories.
+fn memory_counts(workspace: &Workspace) -> (usize, usize, usize) {
+    use brok_core::memory::Scope;
+    let memories = brok_core::MemoryDirs::of(workspace.paths(), workspace.config()).list();
+    let count = |scope| memories.iter().filter(|m| m.scope == scope).count();
+    (count(Scope::Private), count(Scope::Shared), count(Scope::Global))
 }
 
 async fn partitions(workspace: &Workspace) -> Result<Vec<PartitionStatus>> {

@@ -11,6 +11,8 @@ use crate::error::{CoreError, Result};
 pub const BROKSPACE_DIR: &str = ".brokspace";
 /// Name of the configuration file inside [`BROKSPACE_DIR`].
 pub const CONFIG_FILE: &str = "brok.yml";
+/// Folder of shared memories at the workspace root, meant to be committed.
+pub const SHARED_MEMORY_DIR: &str = ".brokspace-memory";
 
 /// Every well-known location inside `.brokspace/`.
 ///
@@ -21,10 +23,14 @@ pub const CONFIG_FILE: &str = "brok.yml";
 /// ├── databases/
 /// │   ├── cold/       root workspace partition
 /// │   └── hot/<id>/   one micro-database per git submodule
+/// ├── memory/         private memories (Markdown, never committed)
+/// ├── links/<name>/   linked workspaces: git clone (src/) and index (state/)
 /// ├── shards/         installed shards + shards.lock
 /// ├── run/            runtime state (socket, tokens, pid)
 /// └── logs/           shard logs
 /// ```
+///
+/// Shared memories live outside it, in `.brokspace-memory/` at the root.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspacePaths {
     /// Workspace root (the directory containing `.brokspace/`).
@@ -45,6 +51,12 @@ pub struct WorkspacePaths {
     pub run: PathBuf,
     /// `.brokspace/logs/`
     pub logs: PathBuf,
+    /// `.brokspace/memory/`
+    pub memory: PathBuf,
+    /// `.brokspace/links/`
+    pub links: PathBuf,
+    /// `.brokspace-memory/` at the workspace root.
+    pub shared_memory: PathBuf,
 }
 
 impl WorkspacePaths {
@@ -52,6 +64,14 @@ impl WorkspacePaths {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         let root = root.into();
         let brokspace = root.join(BROKSPACE_DIR);
+        Self::with_state(root, brokspace)
+    }
+
+    /// The layout of sources in `root` whose state lives in `state` instead
+    /// of `root/.brokspace` (linked workspaces without a Brokspace of their own).
+    pub fn with_state(root: impl Into<PathBuf>, state: impl Into<PathBuf>) -> Self {
+        let root = root.into();
+        let brokspace = state.into();
         Self {
             config_file: brokspace.join(CONFIG_FILE),
             cache: brokspace.join("cache"),
@@ -60,6 +80,9 @@ impl WorkspacePaths {
             shards: brokspace.join("shards"),
             run: brokspace.join("run"),
             logs: brokspace.join("logs"),
+            memory: brokspace.join("memory"),
+            links: brokspace.join("links"),
+            shared_memory: root.join(SHARED_MEMORY_DIR),
             brokspace,
             root,
         }
@@ -112,6 +135,14 @@ impl Workspace {
             return Err(CoreError::NotAWorkspace(paths.root));
         }
         let config = BrokConfig::load(&paths.config_file)?;
+        Ok(Self { paths, config })
+    }
+
+    /// A workspace for the sources in `root` with its state (index) in
+    /// `state`, configured with `config`: how brok indexes a linked
+    /// workspace that has no `.brokspace/` of its own.
+    pub fn detached(root: &Path, state: &Path, config: BrokConfig) -> Result<Self> {
+        let paths = WorkspacePaths::with_state(dunce_canonicalize(root)?, state);
         Ok(Self { paths, config })
     }
 

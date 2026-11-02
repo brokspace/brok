@@ -126,16 +126,41 @@ impl Bm25Index {
 
     /// Top `k` chunk ids for `query`, best first.
     pub fn search(&self, query: &str, k: usize) -> Vec<(String, f32)> {
-        if self.live == 0 || k == 0 {
-            return Vec::new();
-        }
-        let n = self.live as f32;
-        let avg_len = (self.total_len as f32 / self.live as f32).max(1.0);
+        let (_, mut ranked) = self.score(query);
+        ranked.truncate(k);
+        ranked.into_iter().map(|(slot, score, _)| (self.docs[slot as usize].chunk_id.clone(), score)).collect()
+    }
+
+    /// Top `k` chunk ids for `query` with a relevance between 0 and 1 that
+    /// compares across indexes (BM25 scores do not: they depend on each
+    /// corpus): the share of the query's terms a chunk contains, times its
+    /// score relative to the best one here.
+    pub fn search_relevance(&self, query: &str, k: usize) -> Vec<(String, f32)> {
+        let (terms, mut ranked) = self.score(query);
+        ranked.truncate(k);
+        let top = ranked.first().map_or(1.0, |r| r.1.max(f32::EPSILON));
+        ranked
+            .into_iter()
+            .map(|(slot, score, matched)| {
+                let coverage = f32::from(matched) / terms.max(1) as f32;
+                (self.docs[slot as usize].chunk_id.clone(), coverage * score / top)
+            })
+            .collect()
+    }
+
+    /// Number of distinct query terms, and every matching document as
+    /// (slot, BM25 score, terms matched), best first.
+    fn score(&self, query: &str) -> (usize, Vec<(u32, f32, u16)>) {
         let mut terms: Vec<String> = tokenize(query).collect();
         terms.sort();
         terms.dedup();
+        if self.live == 0 {
+            return (terms.len(), Vec::new());
+        }
+        let n = self.live as f32;
+        let avg_len = (self.total_len as f32 / self.live as f32).max(1.0);
 
-        let mut scores: HashMap<u32, f32> = HashMap::new();
+        let mut scores: HashMap<u32, (f32, u16)> = HashMap::new();
         for term in &terms {
             let Some(postings) = self.postings.get(term) else { continue };
             let live_postings: Vec<&(u32, u16)> =
@@ -149,14 +174,16 @@ impl Bm25Index {
                 let tf = f32::from(tf);
                 let len = self.docs[slot as usize].len as f32;
                 let score = idf * tf * (K1 + 1.0) / (tf + K1 * (1.0 - B + B * len / avg_len));
-                *scores.entry(slot).or_default() += score;
+                let entry = scores.entry(slot).or_default();
+                entry.0 += score;
+                entry.1 += 1;
             }
         }
 
-        let mut ranked: Vec<(u32, f32)> = scores.into_iter().collect();
+        let mut ranked: Vec<(u32, f32, u16)> =
+            scores.into_iter().map(|(slot, (score, matched))| (slot, score, matched)).collect();
         ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-        ranked.truncate(k);
-        ranked.into_iter().map(|(slot, score)| (self.docs[slot as usize].chunk_id.clone(), score)).collect()
+        (terms.len(), ranked)
     }
 
     /// Drops tombstones and renumbers documents.
@@ -224,6 +251,24 @@ fn split_identifier(word: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn relevance_compares_across_indexes() {
+        // A big index with a partial match, a tiny one with a full match.
+        let mut big = super::Bm25Index::default();
+        for i in 0..50 {
+            big.add(&format!("noise{i}"), "noise.rs", "fn unrelated() {}");
+        }
+        big.add("user", "users.rs", "fn create_user(name: &str) {}");
+        let mut tiny = super::Bm25Index::default();
+        tiny.add("order", "orders.rs", "fn create_order(cart: &Cart) {}");
+
+        let big_hit = big.search_relevance("createOrder", 5)[0].clone();
+        let tiny_hit = tiny.search_relevance("createOrder", 5)[0].clone();
+        assert_eq!((big_hit.0.as_str(), tiny_hit.0.as_str()), ("user", "order"));
+        assert!(tiny_hit.1 > big_hit.1, "{tiny_hit:?} vs {big_hit:?}");
+        assert!((0.0..=1.0).contains(&tiny_hit.1));
+    }
+
     use super::*;
 
     #[test]

@@ -7,6 +7,9 @@ missing keys take the defaults below. Unknown keys are rejected with a
 "did you mean" style error, so typos never go unnoticed.
 
 Changes take effect on the next command (or after restarting `brok run`).
+`brok config get [key]`, `brok config set <key> <value>` and `brok config
+unset <key>` read and change the file from scripts and editors, with the
+same validation.
 Changing `embeddings.model`, `embeddings.dimensions` or `index.store`
 triggers a rebuild of the affected partitions on the next `brok index`.
 
@@ -15,6 +18,17 @@ triggers a rebuild of the affected partitions on the next `brok index`.
 | Key | Default | Description |
 |---|---|---|
 | `submodules` | `true` | Index git submodules and git repositories nested in the workspace (up to 4 levels, e.g. a folder of repos) as independent *hot* partitions. |
+| `links` | `{}` | Workspaces this one depends on, by name: their code and memories are searched too. Manage them with `brok link`; see [memory.md](memory.md#linked-workspaces). |
+
+Each `links.<name>` entry:
+
+| Key | Default | Description |
+|---|---|---|
+| `path` | | A directory, absolute or relative to this workspace's root. Set `path` or `git`. |
+| `git` | | A git URL, cloned into `.brokspace/links/<name>/src/` by `brok link sync`. |
+| `branch` | remote default | Branch of a `git` link. |
+| `description` | | What it is and how this workspace uses it; searched, so the LLM learns about the dependency. |
+| `memory` | `true` | Also search its memories. |
 
 ## `index`
 
@@ -56,6 +70,17 @@ applies it to every new workspace, so you choose a model once per machine.
 |---|---|---|
 | `limit` | `8` | Default number of results. |
 | `cold_weight` | `0.85` | Score multiplier for partitions other than the one you run the command from. |
+| `link_weight` | `0.8` | Score multiplier for results from linked workspaces. |
+
+## `memory`
+
+| Key | Default | Description |
+|---|---|---|
+| `enabled` | `true` | Search memories with the code and let `brok memory`, the IDE and MCP tools save them. |
+| `sessions` | `true` | Save IDE chat sessions as `session` memories. |
+| `global` | `true` | Search your global memories (every workspace) here too. |
+
+See [memory.md](memory.md) for where memories live and how they are captured.
 
 ## `llm`
 

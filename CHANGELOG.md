@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-02
+
+### Added
+
+- Memory: decisions, facts, notes, handoffs and chat sessions kept between
+  sessions as Markdown files, private (`.brokspace/memory/`), shared with the
+  team (`.brokspace-memory/`, committed) or global (every workspace). Search
+  includes them; `brok memory add | list | search | show | forget`; MCP tools
+  `brok_memory_save`, `brok_memory_search` and `brok_memory_recent`. Secrets
+  are masked before anything is saved. See docs/memory.md.
+- Linked workspaces (`workspace.links`): the services and libraries a
+  workspace depends on, as a path or a git URL, searched with it (results like
+  `../checkout/src/orders.ts`, labeled `@checkout`). `brok link add | list |
+  sync | remove`; git links are cloned and indexed in `.brokspace/links/`.
+- `brok config get | set | unset`: read and change `brok.yml` with validation.
+- `brok status --json` reports `links` and `memory`.
+
+### Changed
+
+- Search ranks every partition, linked workspace and memory together, with
+  a text relevance that compares across indexes (the share of the query's
+  terms a chunk contains, relative to the best match in its index). A strong
+  match in another submodule or a linked workspace now beats a weak one in
+  the current partition; before, each partition's best hit scored the same.
+
 ## [0.2.4] - 2026-11-01
 
 ### Added
