@@ -1,20 +1,23 @@
 //! Federated hybrid search.
 //!
-//! For each partition, BM25 and vector search each produce a ranked list
-//! that is fused with Reciprocal Rank Fusion (RRF): a chunk's score is
-//! `Σ 1 / (k + rank)` over the lists it appears in. RRF needs no score
+//! Every partition of the workspace, every partition of its linked
+//! workspaces (`workspace.links`) and the memories contribute candidates to
+//! two global ranked lists: text matches (BM25, as a relevance that
+//! compares across indexes, see `Bm25Index::search_relevance`) and vector
+//! (cosine) matches, each score multiplied by its source's weight:
+//!
+//! - the *focused* partition (the hot submodule the user works in) keeps
+//!   full weight, every other partition is scaled by `search.cold_weight`;
+//! - linked workspaces are scaled by `search.link_weight`, and their paths
+//!   are shown relative to this workspace (`../checkout/src/...`);
+//! - memories only have text matches.
+//!
+//! The two lists are fused with Reciprocal Rank Fusion (RRF): a chunk's
+//! score is `Σ 1 / (k + rank)` over the lists it appears in. RRF needs no
 //! calibration between BM25 and cosine similarity, and degrades gracefully
-//! to pure BM25 when no vectors are available.
-//!
-//! Partitions are then merged: the *focused* partition (the hot submodule
-//! the user works in) keeps full weight and every other partition is scaled
-//! by `search.cold_weight`, so local context wins ties while the rest of
-//! the workspace still resolves cross-repository references.
-//!
-//! Linked workspaces (`workspace.links`) are searched the same way, scaled
-//! by `search.link_weight`, with their paths shown relative to this
-//! workspace (`../checkout/src/...`). Memories join the ranking as a list
-//! of their own (see `memory.rs`).
+//! to pure BM25 when no vectors are available. Ranking globally (rather
+//! than per index) lets a strong match in a linked workspace beat a weak
+//! one here.
 
 use std::collections::HashMap;
 
@@ -41,8 +44,26 @@ pub struct SearchQuery {
     pub focus: Option<String>,
 }
 
-/// A ranked chunk: (partition index, chunk id, score).
-type Candidate = (usize, String, f32);
+/// Where a candidate comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Source {
+    /// A partition of this workspace.
+    Own(usize),
+    /// A partition of a linked workspace: (link, partition).
+    Link(usize, usize),
+    /// A memory (index in the memory hits).
+    Memory(usize),
+}
+
+/// The two ranked lists, before fusion: (source, chunk id, weighted score).
+#[derive(Default)]
+struct Lists {
+    lexical: Vec<(Source, String, f32)>,
+    vectors: Vec<(Source, String, f32)>,
+}
+
+/// A chunk to fetch: (partition index, chunk id, score).
+pub(crate) type Candidate = (usize, String, f32);
 
 impl Index {
     /// Runs a hybrid search over every partition, the linked workspaces and
@@ -67,37 +88,86 @@ impl Index {
         let model = self.embedder.as_ref().map(|e| e.model_id().to_owned());
         let vector = query_vector.as_deref().zip(model.as_deref());
 
+        let mut lists = Lists::default();
         let mut semantic = false;
-        let own = self.candidates(&query.text, vector, limit, focus.as_deref(), 1.0, &mut semantic).await?;
-        let mut hits = self.hits(own, "", None).await?;
+        self.rank(&query.text, vector, limit, focus.as_deref(), 1.0, &mut semantic, &mut lists, Source::Own).await?;
 
         let mut links = self.links.lock().await;
-        for link in links.iter_mut() {
+        for (l, link) in links.iter_mut().enumerate() {
             link.refresh(&self.config).await;
-            let Some(index) = &link.index else { continue };
-            let weight = self.config.search.link_weight;
-            let found = index.candidates(&query.text, vector, limit, None, weight, &mut semantic).await?;
-            hits.extend(index.hits(found, &link.prefix, Some(&link.link.name)).await?);
+            if let Some(index) = &link.index {
+                let weight = self.config.search.link_weight;
+                index
+                    .rank(&query.text, vector, limit, None, weight, &mut semantic, &mut lists, |p| Source::Link(l, p))
+                    .await?;
+            }
+        }
+
+        // A few memories at most, so code still shows.
+        let memories = if self.config.memory.enabled {
+            self.memory.search(&query.text, limit.div_ceil(3).max(2))
+        } else {
+            Vec::new()
+        };
+        for (m, hit) in memories.iter().enumerate() {
+            lists.lexical.push((Source::Memory(m), hit.chunk_id.clone(), hit.score));
+        }
+
+        // Fuse the global lists.
+        lists.lexical.sort_by(|a, b| b.2.total_cmp(&a.2));
+        lists.vectors.sort_by(|a, b| b.2.total_cmp(&a.2));
+        let key = |source: &Source, id: &str| format!("{source:?}\u{0}{id}");
+        let mut by_key: HashMap<String, (Source, String)> = HashMap::new();
+        let mut ranked = |list: &[(Source, String, f32)]| -> Vec<String> {
+            list.iter()
+                .map(|(source, id, _)| {
+                    let k = key(source, id);
+                    by_key.entry(k.clone()).or_insert((*source, id.clone()));
+                    k
+                })
+                .collect()
+        };
+        let (lexical, vectors) = (ranked(&lists.lexical), ranked(&lists.vectors));
+        let available = usize::from(!lexical.is_empty()) + usize::from(!vectors.is_empty());
+        // Normalize so that rank 1 in every available list scores 1.0.
+        let best = available.max(1) as f32 / (RRF_K + 1.0);
+        let fused = rrf(&[&lexical, &vectors]);
+
+        // The best `limit`, grouped by where they come from.
+        let mut own: Vec<Candidate> = Vec::new();
+        let mut linked: HashMap<usize, Vec<Candidate>> = HashMap::new();
+        let mut hits: Vec<SearchHit> = Vec::new();
+        for (k, score) in fused.into_iter().take(limit) {
+            let Some((source, id)) = by_key.remove(&k) else { continue };
+            let score = score / best;
+            match source {
+                Source::Own(p) => own.push((p, id, score)),
+                Source::Link(l, p) => linked.entry(l).or_default().push((p, id, score)),
+                Source::Memory(m) => {
+                    let mut hit = memories[m].clone();
+                    hit.score = score;
+                    hits.push(hit);
+                }
+            }
+        }
+        hits.extend(self.hits(own, "", None).await?);
+        for (l, candidates) in linked {
+            if let Some(index) = &links[l].index {
+                hits.extend(index.hits(candidates, &links[l].prefix, Some(&links[l].link.name)).await?);
+            }
         }
         drop(links);
 
-        if self.config.memory.enabled {
-            // A memory found by text is worth a chunk found by one of the
-            // lists code is ranked with; a few at most, so code still shows.
-            let lists = if query_vector.is_some() { 2 } else { 1 };
-            hits.extend(self.memory.search(&query.text, limit.div_ceil(3).max(2), lists));
-        }
-
         hits.sort_by(|a, b| b.score.total_cmp(&a.score));
-        hits.truncate(limit);
         Ok(SearchResults { hits, semantic })
     }
 
-    /// The best `limit` chunks over every partition, each scaled by
-    /// `weight` (and by `search.cold_weight` outside the `focus`
-    /// partition). Vectors are searched only in partitions built with the
-    /// query's embedding model.
-    pub(crate) async fn candidates(
+    /// Adds this index's best text and vector matches to `lists`, each
+    /// score scaled by `weight` (and by `search.cold_weight` outside the
+    /// `focus` partition). Vectors are searched only in partitions built with
+    /// the query's embedding model.
+    #[allow(clippy::too_many_arguments)]
+    async fn rank(
         &self,
         text: &str,
         vector: Option<(&[f32], &str)>,
@@ -105,38 +175,28 @@ impl Index {
         focus: Option<&str>,
         weight: f32,
         semantic: &mut bool,
-    ) -> Result<Vec<Candidate>> {
-        let mut candidates = Vec::new();
+        lists: &mut Lists,
+        source: impl Fn(usize) -> Source,
+    ) -> Result<()> {
         for (i, part) in self.parts.iter().enumerate() {
-            let lexical: Vec<String> =
-                part.bm25.search(text, limit * OVERFETCH).into_iter().map(|(id, _)| id).collect();
-            let compatible = |v: &[f32], model: &str| {
-                part.store.dims() == Some(v.len()) && part.embedding().is_none_or(|e| e.model == model)
-            };
-            let vectors: Vec<String> = match vector {
-                Some((v, model)) if compatible(v, model) => {
-                    *semantic = true;
-                    part.store.vector_search(v, limit * OVERFETCH).await?.into_iter().map(|(id, _)| id).collect()
-                }
-                _ => Vec::new(),
-            };
-            let lists = usize::from(!lexical.is_empty()) + usize::from(!vectors.is_empty());
-            if lists == 0 {
-                continue;
-            }
             let weight = match focus {
                 Some(id) if id != part.partition.id => weight * self.config.search.cold_weight,
                 _ => weight,
             };
-            // Normalize so that rank 1 in every available list scores 1.0.
-            let best = lists as f32 / (RRF_K + 1.0);
-            for (id, score) in rrf(&[&lexical, &vectors]) {
-                candidates.push((i, id, weight * score / best));
+            for (id, relevance) in part.bm25.search_relevance(text, limit * OVERFETCH) {
+                lists.lexical.push((source(i), id, relevance * weight));
+            }
+            let compatible = |v: &[f32], model: &str| {
+                part.store.dims() == Some(v.len()) && part.embedding().is_none_or(|e| e.model == model)
+            };
+            if let Some((v, _)) = vector.filter(|(v, model)| compatible(v, model)) {
+                *semantic = true;
+                for (id, similarity) in part.store.vector_search(v, limit * OVERFETCH).await? {
+                    lists.vectors.push((source(i), id, similarity * weight));
+                }
             }
         }
-        candidates.sort_by(|a, b| b.2.total_cmp(&a.2));
-        candidates.truncate(limit);
-        Ok(candidates)
+        Ok(())
     }
 
     /// The chunks behind `candidates`, as hits. A linked workspace's hits

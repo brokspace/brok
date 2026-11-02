@@ -24,6 +24,12 @@ fn user_workspace(dir: &std::path::Path) -> Workspace {
         "export function loadProfile(id: string) { return db.users.find(id); }\n",
     )
     .unwrap();
+    // A weak match for `createOrder` here: the linked workspace's full match must win.
+    std::fs::write(
+        ws.root().join("src/users.ts"),
+        "export function createUser(name: string) { return db.users.insert({ name }); }\n",
+    )
+    .unwrap();
     Workspace::open(ws.root()).unwrap()
 }
 

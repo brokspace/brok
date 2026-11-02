@@ -109,27 +109,20 @@ impl MemorySearch {
         Self { folders, links: link_entries, loaded: Mutex::new(None) }
     }
 
-    /// The best memories for `query`, scored like a single ranked list of
-    /// a partition (`lists` is the number of lists code partitions fuse, so
-    /// a top memory is worth what a chunk found by one of them is).
-    pub(crate) fn search(&self, query: &str, limit: usize, lists: usize) -> Vec<SearchHit> {
+    /// The best memories for `query`, scored by their relevance (0 to 1,
+    /// see `Bm25Index::search_relevance`).
+    pub(crate) fn search(&self, query: &str, limit: usize) -> Vec<SearchHit> {
         let mut guard = self.loaded.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let stamp = self.stamp();
         if guard.as_ref().is_none_or(|loaded| loaded.stamp != stamp) {
             *guard = Some(self.load(stamp));
         }
         let Some(loaded) = guard.as_ref() else { return Vec::new() };
-        let best = lists.max(1) as f32 / (crate::search::RRF_K + 1.0);
         loaded
             .bm25
-            .search(query, limit)
+            .search_relevance(query, limit)
             .into_iter()
-            .enumerate()
-            .filter_map(|(rank, (id, _))| {
-                let entry = &loaded.entries[id.parse::<usize>().ok()?];
-                let score = (1.0 / (crate::search::RRF_K + rank as f32 + 1.0)) / best;
-                Some(hit(entry, score))
-            })
+            .filter_map(|(id, relevance)| Some(hit(&loaded.entries[id.parse::<usize>().ok()?], relevance)))
             .collect()
     }
 
@@ -206,5 +199,5 @@ pub(crate) fn hit(entry: &Entry, score: f32) -> SearchHit {
 pub fn search_memories(workspace: &Workspace, query: &str, limit: usize) -> Vec<SearchHit> {
     let links: Vec<(Link, String)> =
         Link::all(workspace).into_iter().map(|link| (link.clone(), crate::links::prefix(&link, workspace))).collect();
-    MemorySearch::new(workspace, &links).search(query, limit, 1)
+    MemorySearch::new(workspace, &links).search(query, limit)
 }
