@@ -76,6 +76,9 @@ Editors (the Brokspace IDE among them), scripts and CI read brok through
 | `brok memory search <query> --json` | One array of hits, shaped like `brok search` hits (`kind: "memory"`, the title as `symbol`). |
 | `brok link list --json` | One array: `name`, `kind` (`local`, `git`), `root`, `path`, `git`, `branch`, `description`, `memory`, `index` (`own`, `managed`), `exists`, `files`, `chunks`, `error`. |
 | `brok link add/remove/sync ... --json` | One document (`sync`: one result per link with `commit`, `files_indexed` or `error`). |
+| `brok doctor --json` | One array of checks: `status` (`ok`, `warn`, `fail`), `name`, `detail`, `fix`. Exits 0 whatever the checks say. |
+| `brok stats --json` | One document: `days`, `events`, `search` (`latency` {`count`, `p50_ms`, `p95_ms`}, `empty`, `semantic`, `with_links`, `with_memories`), `answers` (`latency`, `first_token`, `failed`, `models`, `skills`), `index` (`latency`, `files_indexed`, `last`), `errors` (`count`, `commands`, `recent[]`). |
+| `brok bug --json --title ... [--what-happened ...] [--repo brok\|brok-agent\|ide] [--context ...]` | One document: `repo`, `url` (the prefilled issue form, to open in a browser), `file` (the saved report), `report` (Markdown, secrets masked). Opens nothing. |
 | `brok config get [key] --json` | The configuration (or one key) as JSON; change it with `brok config set <key> <value>`. |
 | `brok ask ... --json`, `brok review --json`, `brok skill run ... --json` | A stream, one JSON event per line (see below). |
 

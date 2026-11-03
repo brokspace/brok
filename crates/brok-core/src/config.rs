@@ -30,6 +30,8 @@ pub struct BrokConfig {
     pub search: SearchConfig,
     /// Memories kept between sessions.
     pub memory: MemoryConfig,
+    /// Local usage metrics (`brok stats`).
+    pub metrics: MetricsConfig,
     /// LLM routing (OpenAI-compatible providers).
     pub llm: LlmConfig,
     /// Index mirroring.
@@ -47,6 +49,7 @@ impl Default for BrokConfig {
             embeddings: EmbeddingsConfig::default(),
             search: SearchConfig::default(),
             memory: MemoryConfig::default(),
+            metrics: MetricsConfig::default(),
             llm: LlmConfig::default(),
             sync: SyncConfig::default(),
             shards: BTreeMap::new(),
@@ -113,6 +116,22 @@ impl LinkConfig {
     /// A link to a git repository.
     pub fn git(url: impl Into<String>, branch: Option<String>) -> Self {
         Self { git: Some(url.into()), branch, ..Self::default() }
+    }
+}
+
+/// `metrics:` section. Metrics stay on this machine, in `.brokspace/metrics/`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MetricsConfig {
+    /// Record timings and counts of searches, answers, indexing and errors.
+    pub enabled: bool,
+    /// Days of metrics kept; older months are deleted.
+    pub retention_days: u32,
+}
+
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self { enabled: true, retention_days: 90 }
     }
 }
 
@@ -442,6 +461,9 @@ impl BrokConfig {
         }
         if !(0.0..=1.0).contains(&self.search.link_weight) {
             errors.push("search.link_weight must be between 0 and 1".into());
+        }
+        if !(1..=3650).contains(&self.metrics.retention_days) {
+            errors.push("metrics.retention_days must be between 1 and 3650".into());
         }
         for (name, link) in &self.workspace.links {
             if !is_link_name(name) {

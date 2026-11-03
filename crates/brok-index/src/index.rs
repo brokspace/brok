@@ -112,6 +112,8 @@ pub struct Index {
     /// Linked workspaces, opened on the first search.
     pub(crate) links: tokio::sync::Mutex<Vec<LinkedIndex>>,
     pub(crate) memory: MemorySearch,
+    /// Local metrics of this workspace (`brok stats`).
+    pub(crate) metrics: brok_core::metrics::Recorder,
     filter: FileFilter,
     _lock: Option<File>,
 }
@@ -146,6 +148,7 @@ impl Index {
         let links = LinkedIndex::all(workspace);
         let shown: Vec<_> = links.iter().map(|l| (l.link.clone(), l.prefix.clone())).collect();
         let memory = MemorySearch::new(workspace, &shown);
+        let metrics = brok_core::metrics::Recorder::new(paths, &config.metrics);
         Ok(Self {
             root: workspace.root().to_path_buf(),
             filter: FileFilter::new(&config.index)?,
@@ -155,6 +158,7 @@ impl Index {
             embedder,
             links: tokio::sync::Mutex::new(links),
             memory,
+            metrics,
             _lock: lock,
         })
     }
@@ -200,6 +204,7 @@ impl Index {
             self.process(i, candidates, deleted, progress, &mut report).await?;
         }
         report.duration = started.elapsed();
+        self.record_index("full", &report);
         Ok(report)
     }
 
@@ -227,7 +232,24 @@ impl Index {
             self.process(i, candidates, removed, &|_| {}, &mut report).await?;
         }
         report.duration = started.elapsed();
+        if report.files_indexed + report.files_removed > 0 {
+            self.record_index("changes", &report);
+        }
         Ok(report)
+    }
+
+    fn record_index(&self, mode: &str, report: &IndexReport) {
+        self.metrics.record(
+            "index",
+            Some(report.duration),
+            serde_json::json!({
+                "mode": mode,
+                "files_scanned": report.files_scanned,
+                "files_indexed": report.files_indexed,
+                "files_removed": report.files_removed,
+                "chunks": report.chunks,
+            }),
+        );
     }
 
     /// Per-partition statistics.

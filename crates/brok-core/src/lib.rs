@@ -1,6 +1,6 @@
 //! Core building blocks of Brokspace: workspace discovery, the `.brokspace/`
 //! layout, `brok.yml` configuration, the hot/cold partition topology,
-//! memories and linked workspaces.
+//! memories, linked workspaces and local metrics.
 
 #![warn(missing_docs)]
 
@@ -11,6 +11,7 @@ pub mod git;
 pub mod init;
 pub mod links;
 pub mod memory;
+pub mod metrics;
 pub mod partition;
 pub mod user;
 pub mod workspace;

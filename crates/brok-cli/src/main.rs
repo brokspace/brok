@@ -4,6 +4,7 @@ mod cmd;
 mod daemon;
 mod integrations;
 mod local_llm;
+mod metrics;
 mod ui;
 
 use std::path::PathBuf;
@@ -71,6 +72,10 @@ enum Command {
     /// Workspaces this one depends on (other services, libraries): searched with it.
     #[command(subcommand)]
     Link(cmd::link::Command),
+    /// Local metrics: how searches, answers and indexing perform, and what failed.
+    Stats(cmd::stats::Args),
+    /// Report a bug: gathers diagnostics (secrets masked), lets you review them, opens a prefilled issue.
+    Bug(cmd::bug::Args),
     /// Check the installation and explain how to fix what is missing.
     Doctor(cmd::doctor::Args),
     /// Upgrade brok and brok-agent to the latest release and show what changed.
@@ -109,10 +114,13 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let command = command_name(&cli.command);
     match runtime.block_on(run(cli)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            ui::error(&format!("{e:#}"));
+            let message = format!("{e:#}");
+            metrics::recorder().record_error(command, &message);
+            ui::error(&message);
             ExitCode::FAILURE
         }
     }
@@ -123,6 +131,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Some(dir) => dir,
         None => std::env::current_dir()?,
     };
+    metrics::init(&cwd);
     match cli.command {
         Command::Init(args) => cmd::init::run(&cwd, args).await,
         Command::Index(args) => cmd::index::run(&cwd, args).await,
@@ -141,6 +150,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Config(command) => cmd::config::run(&cwd, command).await,
         Command::Memory(command) => cmd::memory::run(&cwd, command).await,
         Command::Link(command) => cmd::link::run(&cwd, command).await,
+        Command::Stats(args) => cmd::stats::run(&cwd, args).await,
+        Command::Bug(args) => cmd::bug::run(&cwd, args).await,
         Command::Doctor(args) => cmd::doctor::run(&cwd, args).await,
         Command::Upgrade(args) => cmd::upgrade::run(&cwd, args).await,
         Command::Skill(command) => cmd::skill::run(&cwd, command).await,
@@ -156,6 +167,39 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Shard(command) => cmd::shard::run(&cwd, command).await,
         Command::Model(command) => cmd::model::run(&cwd, command).await,
         Command::Bus(command) => cmd::bus::run(&cwd, command).await,
+    }
+}
+
+/// The subcommand's name, for metrics and reports.
+fn command_name(command: &Command) -> &'static str {
+    match command {
+        Command::Init(_) => "init",
+        Command::Index(_) => "index",
+        Command::Search(_) => "search",
+        Command::Ask(_) => "ask",
+        Command::Chat(_) => "chat",
+        Command::Review(_) => "review",
+        Command::Commit(_) => "commit",
+        Command::Start => "start",
+        Command::Stop => "stop",
+        Command::Restart => "restart",
+        Command::Logs(_) => "logs",
+        Command::Run(_) => "run",
+        Command::Status(_) => "status",
+        Command::Setup(_) => "setup",
+        Command::Config(_) => "config",
+        Command::Memory(_) => "memory",
+        Command::Link(_) => "link",
+        Command::Stats(_) => "stats",
+        Command::Bug(_) => "bug",
+        Command::Doctor(_) => "doctor",
+        Command::Upgrade(_) => "upgrade",
+        Command::Skill(_) => "skill",
+        Command::Mcp(_) => "mcp",
+        Command::Completions { .. } => "completions",
+        Command::Shard(_) => "shard",
+        Command::Model(_) => "model",
+        Command::Bus(_) => "bus",
     }
 }
 
