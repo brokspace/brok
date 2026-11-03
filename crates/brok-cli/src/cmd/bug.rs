@@ -71,13 +71,17 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
     };
     let what_happened = match args.what_happened.clone() {
         Some(text) => text,
-        None if ask => Input::<String>::new().with_prompt("What happened? (Enter to fill it in on GitHub)").allow_empty(true).interact_text()?,
+        None if ask => Input::<String>::new()
+            .with_prompt("What happened? (Enter to fill it in on GitHub)")
+            .allow_empty(true)
+            .interact_text()?,
         None => String::new(),
     };
 
     let report = report(cwd, args.context.as_deref()).await;
     let file = save(cwd, args.save.as_deref(), &report)?;
-    let url = issue_url(&args.repo, &title, &what_happened, args.expected.as_deref(), args.steps.as_deref(), &report, &file);
+    let url =
+        issue_url(&args.repo, &title, &what_happened, args.expected.as_deref(), args.steps.as_deref(), &report, &file);
 
     if args.json {
         let shown = home_relative(&file.display().to_string());
@@ -89,7 +93,12 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
     println!();
     ui::success(&format!("Report saved to {}", file.display()));
     ui::hint("secrets are masked and your home directory shows as ~; read it before you share it");
-    if ask && !Confirm::new().with_prompt(format!("Open a prefilled issue in brokspace/{}?", args.repo)).default(true).interact()? {
+    if ask
+        && !Confirm::new()
+            .with_prompt(format!("Open a prefilled issue in brokspace/{}?", args.repo))
+            .default(true)
+            .interact()?
+    {
         return Ok(());
     }
     if args.no_open || open_url(&url).is_err() {
@@ -175,7 +184,11 @@ pub async fn report(cwd: &Path, context: Option<&str>) -> String {
         let log = std::fs::read_to_string(daemon::log_file(workspace)).unwrap_or_default();
         let lines: Vec<&str> = log.lines().collect();
         if !lines.is_empty() {
-            let _ = write!(out, "\n## Log (last {} lines of .brokspace/logs/brok.log)\n\n```text\n", LOG_LINES.min(lines.len()));
+            let _ = write!(
+                out,
+                "\n## Log (last {} lines of .brokspace/logs/brok.log)\n\n```text\n",
+                LOG_LINES.min(lines.len())
+            );
             for line in &lines[lines.len().saturating_sub(LOG_LINES)..] {
                 out.push_str(line);
                 out.push('\n');
@@ -220,7 +233,11 @@ fn save(cwd: &Path, target: Option<&Path>, report: &str) -> Result<PathBuf> {
     let path = match target {
         Some(path) => path.to_path_buf(),
         None => {
-            let stamp = brok_core::memory::now_rfc3339().replace([':', '-'], "").replace('T', "-").trim_end_matches('Z').to_owned();
+            let stamp = brok_core::memory::now_rfc3339()
+                .replace([':', '-'], "")
+                .replace('T', "-")
+                .trim_end_matches('Z')
+                .to_owned();
             let dir = match Workspace::discover(cwd) {
                 Ok(workspace) => workspace.paths().brokspace.join("reports"),
                 Err(_) => std::env::temp_dir(),
@@ -301,9 +318,12 @@ mod tests {
 
     #[test]
     fn urls_are_encoded_and_bounded() {
-        let report = format!("## Environment\n\n- brok 0.4.0\n\n## brok doctor\n\n{}\n## Log\n\nsecret log", "x".repeat(10_000));
+        let report =
+            format!("## Environment\n\n- brok 0.4.0\n\n## brok doctor\n\n{}\n## Log\n\nsecret log", "x".repeat(10_000));
         let url = issue_url("ide", "Crash & burn", "it broke", None, Some("brok ask"), &report, Path::new("/tmp/r.md"));
-        assert!(url.starts_with("https://github.com/brokspace/ide/issues/new?template=bug.yml&title=Crash%20%26%20burn&doctor="));
+        assert!(url.starts_with(
+            "https://github.com/brokspace/ide/issues/new?template=bug.yml&title=Crash%20%26%20burn&doctor="
+        ));
         assert!(url.contains("&what-happened=it%20broke&command=brok%20ask"), "{url}");
         assert!(!url.contains("expected="));
         assert!(!url.contains("secret%20log"), "the log stays out of the URL");

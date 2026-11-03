@@ -4,10 +4,10 @@ use std::path::Path;
 
 use anyhow::{Result, bail};
 use brok_core::Workspace;
-use serde::Serialize;
 use brok_index::{Access, Index, ModelFiles};
 use brok_shard::{Registry, SYSTEM_AGENT};
 use console::style;
+use serde::Serialize;
 
 use crate::integrations::{self, Agent};
 use crate::{daemon, local_llm};
@@ -53,7 +53,12 @@ struct Report {
 
 impl Report {
     fn line(&mut self, status: Status, name: &str, detail: &str, fix: Option<&str>) {
-        self.checks.push(Check { status, name: name.to_owned(), detail: detail.to_owned(), fix: fix.map(str::to_owned) });
+        self.checks.push(Check {
+            status,
+            name: name.to_owned(),
+            detail: detail.to_owned(),
+            fix: fix.map(str::to_owned),
+        });
     }
 }
 
@@ -258,9 +263,12 @@ async fn check_workspace(workspace: &Workspace, report: &mut Report) {
                     &format!("{}: {} files, {} chunks", link.name, link.files, link.chunks),
                     None,
                 ),
-                Some(error) => {
-                    report.line(Status::Warn, "link", &format!("{}: {error}", link.name), Some(&format!("brok link sync {}", link.name)))
-                }
+                Some(error) => report.line(
+                    Status::Warn,
+                    "link",
+                    &format!("{}: {error}", link.name),
+                    Some(&format!("brok link sync {}", link.name)),
+                ),
             }
         }
     }

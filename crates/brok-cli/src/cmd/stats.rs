@@ -127,7 +127,7 @@ pub fn summarize(events: &[Event], days: u32) -> Summary {
         events.iter().filter(|e| e.kind == kind && filter(e)).filter_map(|e| e.ms).collect()
     };
     let searches: Vec<&Event> = events.iter().filter(|e| e.kind == "search").collect();
-    let count = |filter: &dyn Fn(&&Event) -> bool| searches.iter().filter(|e| filter(*e)).count();
+    let count = |filter: &dyn Fn(&&Event) -> bool| searches.iter().filter(|e| filter(e)).count();
     let search = Searches {
         latency: Latency::of(&ms("search", &|_| true)),
         empty: count(&|e| e.number("hits") == Some(0.0)),
@@ -235,7 +235,12 @@ fn print(summary: &Summary) {
         i.last.as_deref().map(|at| format!(" · last {}", short(at))).unwrap_or_default()
     );
     let e = &summary.errors;
-    println!("  {:<9} {}{}", style("errors").bold(), e.count, if e.count > 0 { format!(" · {}", top(&e.commands)) } else { String::new() });
+    println!(
+        "  {:<9} {}{}",
+        style("errors").bold(),
+        e.count,
+        if e.count > 0 { format!(" · {}", top(&e.commands)) } else { String::new() }
+    );
     for failure in &e.recent {
         println!("    {} {}: {}", style(short(&failure.at)).dim(), failure.command, style(&failure.message).dim());
     }
@@ -292,7 +297,11 @@ mod tests {
         let events = vec![
             event("search", Some(10), json!({ "hits": 8, "semantic": true, "links": 2, "memories": 1 })),
             event("search", Some(30), json!({ "hits": 0, "semantic": false, "links": 0, "memories": 0 })),
-            event("answer", Some(4_000), json!({ "ok": true, "provider": "ollama", "model": "qwen", "first_token_ms": 900 })),
+            event(
+                "answer",
+                Some(4_000),
+                json!({ "ok": true, "provider": "ollama", "model": "qwen", "first_token_ms": 900 }),
+            ),
             event("answer", Some(9_000), json!({ "ok": false, "skill": "code-review" })),
             event("index", Some(200), json!({ "files_indexed": 12 })),
             event("error", None, json!({ "command": "ask", "message": "no answer" })),

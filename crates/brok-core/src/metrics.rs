@@ -220,7 +220,8 @@ mod tests {
     fn prune_old_months() {
         let (_dir, paths) = paths();
         std::fs::create_dir_all(&paths.metrics).unwrap();
-        std::fs::write(paths.metrics.join("2001-01.jsonl"), "{\"at\":\"2001-01-02T00:00:00Z\",\"kind\":\"search\"}\n").unwrap();
+        std::fs::write(paths.metrics.join("2001-01.jsonl"), "{\"at\":\"2001-01-02T00:00:00Z\",\"kind\":\"search\"}\n")
+            .unwrap();
         Recorder::new(&paths, &MetricsConfig::default()).record("search", None, Value::Null);
         assert_eq!(load(&paths, 36_500).len(), 2);
         prune(&paths, &MetricsConfig::default());
