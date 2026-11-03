@@ -58,6 +58,7 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
     let mut tasks = JoinSet::new();
     start_index_service(&workspace, &bus, &index_shutdown, &mut tasks).await;
     catch_up_links(&workspace);
+    brok_core::metrics::prune(workspace.paths(), &workspace.config().metrics);
 
     // Shards.
     let shard_shutdown = CancellationToken::new();

@@ -4,6 +4,7 @@ use std::path::Path;
 
 use anyhow::{Result, bail};
 use brok_core::Workspace;
+use serde::Serialize;
 use brok_index::{Access, Index, ModelFiles};
 use brok_shard::{Registry, SYSTEM_AGENT};
 use console::style;
@@ -13,42 +14,80 @@ use crate::{daemon, local_llm};
 
 /// Arguments of `brok doctor`.
 #[derive(Debug, clap::Args)]
-pub struct Args {}
+pub struct Args {
+    /// Print the checks as JSON (`[{"status", "name", "detail", "fix"}]`) and exit 0.
+    #[arg(long)]
+    json: bool,
+}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Status {
+/// Outcome of a check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Status {
+    /// Works.
     Ok,
+    /// Works, but something would unlock more.
     Warn,
+    /// Needs attention.
     Fail,
 }
 
+/// One check of `brok doctor`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Check {
+    /// How it went.
+    pub status: Status,
+    /// What was checked (`llm`, `index`, ...).
+    pub name: String,
+    /// What was found.
+    pub detail: String,
+    /// The command or step that fixes it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fix: Option<String>,
+}
+
+#[derive(Default)]
 struct Report {
-    failures: usize,
-    warnings: usize,
+    checks: Vec<Check>,
 }
 
 impl Report {
     fn line(&mut self, status: Status, name: &str, detail: &str, fix: Option<&str>) {
-        let mark = match status {
-            Status::Ok => style("✓").green().bold(),
-            Status::Warn => {
-                self.warnings += 1;
-                style("!").yellow().bold()
-            }
-            Status::Fail => {
-                self.failures += 1;
-                style("✗").red().bold()
-            }
-        };
-        println!("{mark} {:<14} {detail}", style(name).bold());
-        if let Some(fix) = fix {
-            println!("  {:<14} {}", "", style(format!("fix: {fix}")).dim());
-        }
+        self.checks.push(Check { status, name: name.to_owned(), detail: detail.to_owned(), fix: fix.map(str::to_owned) });
     }
 }
 
-pub async fn run(cwd: &Path, _args: Args) -> Result<()> {
-    let mut report = Report { failures: 0, warnings: 0 };
+pub async fn run(cwd: &Path, args: Args) -> Result<()> {
+    let checks = checks(cwd).await;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&checks)?);
+        return Ok(());
+    }
+    for check in &checks {
+        let mark = match check.status {
+            Status::Ok => style("✓").green().bold(),
+            Status::Warn => style("!").yellow().bold(),
+            Status::Fail => style("✗").red().bold(),
+        };
+        println!("{mark} {:<14} {}", style(&check.name).bold(), check.detail);
+        if let Some(fix) = &check.fix {
+            println!("  {:<14} {}", "", style(format!("fix: {fix}")).dim());
+        }
+    }
+    let count = |status| checks.iter().filter(|c| c.status == status).count();
+    println!();
+    match (count(Status::Fail), count(Status::Warn)) {
+        (0, 0) => println!("{}", style("Everything looks good.").green()),
+        (0, w) => println!("{}", style(format!("{w} suggestion(s); Brokspace works, these unlock more.")).yellow()),
+        (f, _) => bail!("{f} problem(s) need attention"),
+    }
+    Ok(())
+}
+
+/// Runs every check (installation, workspace, index, model, LLM, agent,
+/// daemon, integrations, linked workspaces).
+pub async fn checks(cwd: &Path) -> Vec<Check> {
+    let mut report = Report::default();
     let features = brok_index::compiled_features();
     let build = if features.is_empty() { "lean build: text search only".to_owned() } else { features.join(", ") };
     report.line(Status::Ok, "brok", &format!("{} ({build})", env!("CARGO_PKG_VERSION")), None);
@@ -77,14 +116,7 @@ pub async fn run(cwd: &Path, _args: Args) -> Result<()> {
         Ok(workspace) => check_workspace(&workspace, &mut report).await,
         Err(e) => report.line(Status::Fail, "workspace", &format!("{e}"), Some("run `brok init` in your project root")),
     }
-
-    println!();
-    match (report.failures, report.warnings) {
-        (0, 0) => println!("{}", style("Everything looks good.").green()),
-        (0, w) => println!("{}", style(format!("{w} suggestion(s); Brokspace works, these unlock more.")).yellow()),
-        (f, _) => bail!("{f} problem(s) need attention"),
-    }
-    Ok(())
+    report.checks
 }
 
 async fn check_workspace(workspace: &Workspace, report: &mut Report) {
@@ -214,6 +246,22 @@ async fn check_workspace(workspace: &Workspace, report: &mut Report) {
                 Some(&format!("brok setup agents -a {}", format!("{agent:?}").to_lowercase())),
             ),
             _ => {}
+        }
+    }
+
+    if let Ok(links) = super::link::statuses(workspace).await {
+        for link in links {
+            match link.error {
+                None => report.line(
+                    Status::Ok,
+                    "link",
+                    &format!("{}: {} files, {} chunks", link.name, link.files, link.chunks),
+                    None,
+                ),
+                Some(error) => {
+                    report.line(Status::Warn, "link", &format!("{}: {error}", link.name), Some(&format!("brok link sync {}", link.name)))
+                }
+            }
         }
     }
 }

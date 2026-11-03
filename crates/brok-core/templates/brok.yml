@@ -72,6 +72,12 @@ memory:
   # Search your global memories here too.
   global: true
 
+metrics:
+  # Timings and counts of searches, answers, indexing and errors, kept on
+  # this machine in .brokspace/metrics/ (`brok stats`). Nothing is sent.
+  enabled: true
+  retention_days: 90
+
 llm:
   # Provider used by `brok ask` unless --provider is given.
   default: ollama

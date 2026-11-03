@@ -119,6 +119,8 @@ your workspaces, so `brok init` in the next project takes seconds.
 | `brok commit [--yes \| --print]` | Commit message for the staged changes, then commit |
 | `brok start` / `stop` / `restart` / `logs -f` | The background daemon (bus, live indexing, agent) |
 | `brok status` / `brok doctor` | What is indexed and running / health check with fixes |
+| `brok stats [--days N]` | Local metrics: search and answer latency, indexing, recent errors |
+| `brok bug` | A bug report with diagnostics (secrets masked) and a prefilled issue |
 | `brok upgrade [--check]` | Upgrade brok and brok-agent to the latest release, with what changed |
 | `brok index [--rebuild]` | Re-index (incremental; the daemon does it automatically) |
 | `brok memory add \| list \| search \| show \| forget` | What Brokspace remembers between sessions |
@@ -140,6 +142,7 @@ your workspaces, so `brok init` in the next project takes seconds.
 | [Local LLM setup](docs/local-llm.md) | Ollama / LM Studio, which model fits your machine |
 | [Memory and linked workspaces](docs/memory.md) | What Brokspace remembers, and the workspaces yours depends on |
 | [Integrations](docs/integrations.md) | Coding agents (MCP + skills), LLMs, storage |
+| [Troubleshooting](docs/troubleshooting.md) | Doctor, logs, metrics, common problems and reporting bugs |
 | [Skills](docs/skills.md) | Built-in workflows, writing and sharing skills |
 | [Shards](docs/shards.md) | Build event-driven integrations, `shard.json` reference |
 | [Configuration](docs/configuration.md) | Every `brok.yml` key |
