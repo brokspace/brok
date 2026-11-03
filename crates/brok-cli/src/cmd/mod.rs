@@ -1,6 +1,7 @@
 //! One module per subcommand.
 
 pub mod ask;
+pub mod bug;
 pub mod bus;
 pub mod chat;
 pub mod config;
@@ -18,6 +19,7 @@ pub mod service;
 pub mod setup;
 pub mod shard;
 pub mod skill;
+pub mod stats;
 pub mod status;
 pub mod upgrade;
 

@@ -69,6 +69,7 @@ impl Index {
     /// Runs a hybrid search over every partition, the linked workspaces and
     /// the memories.
     pub async fn search(&self, query: &SearchQuery) -> Result<SearchResults> {
+        let started = std::time::Instant::now();
         let limit = query.limit.max(1);
         let focus = query
             .focus
@@ -159,6 +160,15 @@ impl Index {
         drop(links);
 
         hits.sort_by(|a, b| b.score.total_cmp(&a.score));
+        let from_links = hits.iter().filter(|h| h.partition.starts_with('@') && h.kind != "memory").count();
+        let memories = hits.iter().filter(|h| h.kind == "memory").count();
+        self.metrics.record(
+            "search",
+            Some(started.elapsed()),
+            serde_json::json!({
+                "hits": hits.len(), "semantic": semantic, "links": from_links, "memories": memories,
+            }),
+        );
         Ok(SearchResults { hits, semantic })
     }
 

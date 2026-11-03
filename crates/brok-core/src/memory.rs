@@ -318,7 +318,7 @@ pub fn read(path: &Path, scope: Scope) -> Option<Memory> {
         None => (Front::default(), text.as_str()),
     };
     let body = body.trim().to_owned();
-    let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok().map(rfc3339).unwrap_or_default();
+    let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok().map(rfc3339_at).unwrap_or_default();
     let title = if front.title.trim().is_empty() {
         body.lines()
             .find_map(|line| line.strip_prefix('#').map(|h| h.trim_start_matches('#').trim().to_owned()))
@@ -427,10 +427,11 @@ pub fn mask_secrets(text: &str) -> String {
 
 /// The current time, RFC 3339 in UTC with seconds.
 pub fn now_rfc3339() -> String {
-    rfc3339(SystemTime::now())
+    rfc3339_at(SystemTime::now())
 }
 
-fn rfc3339(time: SystemTime) -> String {
+/// `time` as RFC 3339 in UTC with seconds.
+pub fn rfc3339_at(time: SystemTime) -> String {
     let secs = time.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
     let days = i64::try_from(secs / 86_400).unwrap_or(0);
     let rem = secs % 86_400;
@@ -529,7 +530,7 @@ mod tests {
 
     #[test]
     fn dates() {
-        assert_eq!(rfc3339(UNIX_EPOCH), "1970-01-01T00:00:00Z");
-        assert_eq!(rfc3339(UNIX_EPOCH + std::time::Duration::from_secs(1_793_619_890)), "2026-11-02T11:44:50Z");
+        assert_eq!(rfc3339_at(UNIX_EPOCH), "1970-01-01T00:00:00Z");
+        assert_eq!(rfc3339_at(UNIX_EPOCH + std::time::Duration::from_secs(1_793_619_890)), "2026-11-02T11:44:50Z");
     }
 }

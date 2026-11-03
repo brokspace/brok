@@ -2,7 +2,7 @@
 
 use std::io::Write;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use brok_sdk::payload::{AskChunk, AskDone, AskFailed, AskRequest};
@@ -90,11 +90,27 @@ pub async fn stream(client: &BrokClient, request: &AskRequest) -> Result<String>
 pub async fn answer(client: &BrokClient, request: &AskRequest, output: Output) -> Result<String> {
     let mut waiting = (output == Output::Terminal && ui::interactive())
         .then(|| ui::spinner("Thinking (a local model on a CPU can take a minute or more)"));
-    let result = receive(client, request, output, &mut waiting).await;
+    let started = Instant::now();
+    let mut first_token = None;
+    let result = receive(client, request, output, &mut waiting, &mut first_token).await;
     if let Some(spinner) = waiting {
         spinner.finish_and_clear();
     }
-    result
+    // Local metrics (`brok stats`): how long answers take and how often they fail.
+    let (provider, model) = match &result {
+        Ok((_, done)) => (Some(done.provider.as_str()), Some(done.model.as_str())),
+        Err(_) => (None, None),
+    };
+    let first_token_ms = first_token.map(|at: Instant| u64::try_from((at - started).as_millis()).unwrap_or(u64::MAX));
+    crate::metrics::recorder().record(
+        "answer",
+        Some(started.elapsed()),
+        json!({
+            "ok": result.is_ok(), "skill": request.skill.as_ref().map(|s| s.name.as_str()),
+            "provider": provider, "model": model, "first_token_ms": first_token_ms, "turns": request.history.len(),
+        }),
+    );
+    result.map(|(text, _)| text)
 }
 
 async fn receive(
@@ -102,7 +118,8 @@ async fn receive(
     request: &AskRequest,
     output: Output,
     waiting: &mut Option<indicatif::ProgressBar>,
-) -> Result<String> {
+    first_token: &mut Option<Instant>,
+) -> Result<(String, AskDone)> {
     let mut replies = client.request(Event::from_payload(request)?).await?;
     let mut stdout = std::io::stdout().lock();
     let mut text = String::new();
@@ -119,6 +136,7 @@ async fn receive(
             if let Some(spinner) = waiting.take() {
                 spinner.finish_and_clear();
             }
+            first_token.get_or_insert_with(Instant::now);
             match output {
                 Output::Terminal => stdout.write_all(chunk.text.as_bytes())?,
                 Output::Json => writeln!(stdout, "{}", json!({ "type": "chunk", "text": chunk.text }))?,
@@ -141,7 +159,7 @@ async fn receive(
                 }
                 Output::Silent => {}
             }
-            return Ok(text);
+            return Ok((text, done));
         } else if let Ok(failed) = reply.decode::<AskFailed>() {
             bail!("the agent failed: {}", failed.message);
         }

@@ -24,6 +24,7 @@ pub const SHARED_MEMORY_DIR: &str = ".brokspace-memory";
 /// │   ├── cold/       root workspace partition
 /// │   └── hot/<id>/   one micro-database per git submodule
 /// ├── memory/         private memories (Markdown, never committed)
+/// ├── metrics/        local usage metrics (`brok stats`)
 /// ├── links/<name>/   linked workspaces: git clone (src/) and index (state/)
 /// ├── shards/         installed shards + shards.lock
 /// ├── run/            runtime state (socket, tokens, pid)
@@ -55,6 +56,8 @@ pub struct WorkspacePaths {
     pub memory: PathBuf,
     /// `.brokspace/links/`
     pub links: PathBuf,
+    /// `.brokspace/metrics/`
+    pub metrics: PathBuf,
     /// `.brokspace-memory/` at the workspace root.
     pub shared_memory: PathBuf,
 }
@@ -82,6 +85,7 @@ impl WorkspacePaths {
             logs: brokspace.join("logs"),
             memory: brokspace.join("memory"),
             links: brokspace.join("links"),
+            metrics: brokspace.join("metrics"),
             shared_memory: root.join(SHARED_MEMORY_DIR),
             brokspace,
             root,

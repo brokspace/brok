@@ -24,8 +24,8 @@ body:
   - type: textarea
     id: doctor
     attributes:
-      label: Output of `brok doctor`
-      description: Version, OS, compiled backends and workspace health in one go. Remove anything sensitive.
+      label: Diagnostics (`brok bug` fills this in, or paste `brok doctor`)
+      description: Version, OS, compiled backends and workspace health in one go. `brok bug` masks secrets; check anyway.
       render: text
     validations:
       required: true

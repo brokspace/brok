@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-03
+
+### Added
+
+- Local metrics: searches, answers, indexing runs and failed commands are
+  recorded in `.brokspace/metrics/` (timings and counts only, never queries or
+  content; nothing leaves the machine). `brok stats [--days N] [--json]` shows
+  latencies (p50, p95), failures and the latest errors. `metrics.enabled` and
+  `metrics.retention_days` in brok.yml.
+- `brok bug`: a report with versions, OS, `brok doctor`, metrics, the end of
+  the log and brok.yml (secrets masked, home directory as `~`), saved to
+  `.brokspace/reports/`, and a prefilled issue form opened in the browser.
+  `--repo brok|brok-agent|ide`, `--json` for editors.
+- `brok doctor --json`, and doctor checks linked workspaces.
+- docs/troubleshooting.md: common problems, metrics and bug reports.
+
 ## [0.3.0] - 2026-11-02
 
 ### Added
