@@ -441,6 +441,10 @@ impl BrokConfig {
             Err(error) => return Err(CoreError::io(path, error)),
         };
         let merged = merge_yaml(&existing, &yaml);
+        let merged = match Self::from_yaml(&merged) {
+            Ok(parsed) if parsed == *self => merged,
+            _ => yaml,
+        };
         crate::fsutil::write_atomic(path, merged.as_bytes())
     }
 
@@ -511,6 +515,7 @@ pub fn is_link_name(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
+/// A block-style YAML key and its location in the source lines.
 struct KeyLine {
     path: Vec<String>,
     index: usize,
@@ -518,6 +523,9 @@ struct KeyLine {
     has_children: bool,
 }
 
+/// Merges serde's block-style YAML into an existing block-style document.
+/// Hand-written block lists nested under their keys are supported; flow-style
+/// mappings and unusual YAML constructs fall back to serialization in `save`.
 fn merge_yaml(existing: &str, serialized: &str) -> String {
     let desired_lines: Vec<String> = serialized.lines().map(str::to_owned).collect();
     let mut lines: Vec<String> = existing.lines().map(str::to_owned).collect();
@@ -535,7 +543,7 @@ fn merge_yaml(existing: &str, serialized: &str) -> String {
     let obsolete_paths: std::collections::BTreeSet<Vec<String>> =
         obsolete.iter().map(|key| key.path.clone()).collect();
     obsolete.retain(|key| {
-        !(1..key.path.len()).any(|length| obsolete_paths.contains(&key.path[..length].to_vec()))
+        !(1..key.path.len()).any(|length| obsolete_paths.contains(&key.path[..length]))
     });
     for key in obsolete {
         let end = block_end(&lines, &key);
@@ -600,8 +608,9 @@ fn merge_yaml(existing: &str, serialized: &str) -> String {
         lines.splice(insertion..insertion, block);
     }
 
-    let mut output = lines.join("\n");
-    output.push('\n');
+    let line_ending = if existing.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut output = lines.join(line_ending);
+    output.push_str(line_ending);
     output
 }
 
@@ -643,6 +652,7 @@ fn yaml_block(lines: &[String], start: usize, indent: usize) -> Vec<String> {
     lines[start..end].to_vec()
 }
 
+/// Finds the end of a key's indented block, including its indented comments.
 fn block_end(lines: &[String], key: &KeyLine) -> usize {
     let mut end = key.index + 1;
     for (index, line) in lines.iter().enumerate().skip(key.index + 1) {
@@ -729,7 +739,7 @@ fn replace_yaml_value(existing: &str, desired: &str) -> String {
         .map(|desired_colon| desired[desired_colon + 1..].trim())
         .unwrap_or(desired);
     let after_colon = &existing[colon + 1..];
-    let spacing = after_colon.chars().take_while(|character| character.is_whitespace()).count();
+    let spacing = after_colon.len() - after_colon.trim_start().len();
     let comment = inline_comment_start(existing).map(|comment_index| {
         let mut start = comment_index;
         while start > colon + 1 + spacing
@@ -755,6 +765,7 @@ enum Located {
 }
 
 #[derive(Default)]
+/// Tracks nested plain YAML keys; quoted keys containing `:` are not supported.
 struct Locator {
     stack: Vec<(usize, String)>,
     block_scalar_indent: Option<usize>,
@@ -916,6 +927,78 @@ mod tests {
     }
 
     #[test]
+    fn save_removes_deleted_keys_with_inline_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brok.yml");
+        let mut config = BrokConfig::from_yaml(DEFAULT_TEMPLATE).unwrap();
+        config.llm.providers.get_mut("ollama").unwrap().temperature = Some(0.4);
+        config.save(&path).unwrap();
+
+        let original = std::fs::read_to_string(&path).unwrap();
+        let original = original.replace(
+            "      temperature: 0.4",
+            "      temperature: 0.4 # remove with this setting",
+        );
+        std::fs::write(&path, original).unwrap();
+
+        config.llm.providers.get_mut("ollama").unwrap().temperature = None;
+        config.save(&path).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("temperature:"));
+        assert!(!text.contains("remove with this setting"));
+        assert_eq!(BrokConfig::load(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn save_handles_empty_and_comment_only_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let empty_path = dir.path().join("empty.yml");
+        let comments_path = dir.path().join("comments.yml");
+        std::fs::write(&empty_path, "").unwrap();
+        std::fs::write(&comments_path, "# Keep this file-level note.\n").unwrap();
+
+        let config = BrokConfig::default();
+        config.save(&empty_path).unwrap();
+        config.save(&comments_path).unwrap();
+
+        assert_eq!(BrokConfig::load(&empty_path).unwrap(), config);
+        let comments = std::fs::read_to_string(&comments_path).unwrap();
+        assert!(comments.contains("# Keep this file-level note."));
+        assert_eq!(BrokConfig::load(&comments_path).unwrap(), config);
+    }
+
+    #[test]
+    fn save_preserves_crlf_line_endings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brok.yml");
+        let original = DEFAULT_TEMPLATE.replace("\n", "\r\n");
+        std::fs::write(&path, &original).unwrap();
+
+        let mut config = BrokConfig::from_yaml(&original).unwrap();
+        config.embeddings.enabled = false;
+        config.save(&path).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.replace("\r\n", "").contains('\n'));
+        assert_eq!(BrokConfig::load(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn save_falls_back_when_existing_yaml_cannot_be_merged_safely() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brok.yml");
+        let original = "version: 1\nindex:\n  include: &patterns [\"**/*\"]\n  exclude: *patterns\n";
+        std::fs::write(&path, original).unwrap();
+
+        let mut config = BrokConfig::from_yaml(original).unwrap();
+        config.index.include = vec!["src/**".into()];
+        config.save(&path).unwrap();
+
+        assert_eq!(BrokConfig::load(&path).unwrap(), config);
+    }
+
+    #[test]
     fn save_replaces_sequences_and_multiline_scalars() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("brok.yml");
@@ -925,15 +1008,22 @@ mod tests {
             "docs".into(),
             LinkConfig {
                 path: Some("../docs".into()),
-                description: Some("First line\nUpdated second line".into()),
+                description: Some("First line\nOriginal second line".into()),
                 ..LinkConfig::default()
             },
         );
         config.save(&path).unwrap();
 
+        config.index.include = vec!["src/**".into(), "crates/**".into()];
+        config.workspace.links.get_mut("docs").unwrap().description =
+            Some("First line\nUpdated second line".into());
+        config.save(&path).unwrap();
+
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("- src/**"), "{text}");
-        assert!(text.contains("- tests/**"), "{text}");
+        assert!(text.contains("- crates/**"), "{text}");
+        assert!(!text.contains("- tests/**"), "{text}");
+        assert!(!text.contains("Original second line"), "{text}");
         assert!(text.contains("Updated second line"), "{text}");
         assert_eq!(BrokConfig::load(&path).unwrap(), config);
     }
@@ -942,33 +1032,51 @@ mod tests {
     fn save_supports_dotted_link_names_and_empty_mappings() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("brok.yml");
-        let original = DEFAULT_TEMPLATE.replace("  links: {}", "  links: {}");
-        std::fs::write(&path, original).unwrap();
-        let mut config = BrokConfig::from_yaml(DEFAULT_TEMPLATE).unwrap();
+        let original = DEFAULT_TEMPLATE.replace(
+            "  links: {}",
+            "  links:\n    existing:\n      path: ../existing",
+        );
+        std::fs::write(&path, &original).unwrap();
+        let mut config = BrokConfig::from_yaml(&original).unwrap();
         config.workspace.links.insert("shared.lib".into(), LinkConfig::local("../shared"));
         config.save(&path).unwrap();
 
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("shared.lib:"), "{text}");
         assert_eq!(BrokConfig::load(&path).unwrap(), config);
+
+        let empty_mapping_path = dir.path().join("empty-links.yml");
+        let mut empty_mapping_config = BrokConfig::from_yaml(DEFAULT_TEMPLATE).unwrap();
+        empty_mapping_config.workspace.links.insert(
+            "shared.lib".into(),
+            LinkConfig::local("../shared"),
+        );
+        empty_mapping_config.save(&empty_mapping_path).unwrap();
+        assert_eq!(BrokConfig::load(&empty_mapping_path).unwrap(), empty_mapping_config);
     }
 
     #[test]
     fn save_reindents_inserted_keys_to_existing_parent_children() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("brok.yml");
-        let original = DEFAULT_TEMPLATE
-            .replace("    ollama:", "        ollama:")
-            .replace("      base_url:", "            base_url:")
-            .replace("      model:", "            model:");
+        let original = DEFAULT_TEMPLATE.replace(
+            "    ollama:\n      base_url: http://localhost:11434/v1\n      model: qwen2.5-coder:7b\n",
+            "    ollama:\n        base_url: http://localhost:11434/v1\n        model: qwen2.5-coder:7b\n",
+        );
         std::fs::write(&path, &original).unwrap();
         let mut config = BrokConfig::from_yaml(&original).unwrap();
         config.llm.providers.get_mut("ollama").unwrap().temperature = Some(0.25);
         config.save(&path).unwrap();
 
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("            temperature: 0.25"), "{text}");
+        assert!(text.contains("        temperature: 0.25"), "{text}");
         assert_eq!(BrokConfig::load(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn replace_yaml_value_handles_non_ascii_spacing() {
+        let updated = replace_yaml_value("value:\u{a0}old", "value: new");
+        assert_eq!(updated, "value:\u{a0}new");
     }
 
     #[test]

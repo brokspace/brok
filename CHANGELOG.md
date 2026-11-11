@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve YAML comments and ordering while safely reconciling configuration values, lists, removed keys and nested links.
+
 ## [0.4.0] - 2026-11-03
 
 ### Added
