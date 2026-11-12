@@ -131,7 +131,13 @@ wingetcreate new https://github.com/brokspace/brok/releases/download/v0.4.0/brok
 Use package identifiers `Brokspace.Brok`, `Brokspace.BrokAgent` and
 `Brokspace.BrokspaceIDE`. For the CLI tools choose installer type
 `portable` and command alias `brok` / `brok-agent`. For the IDE choose `nullsoft`
-(silent switch `/S`). The command offers to submit the pull request.
+(silent switch `/S`). Before submitting `Brokspace.Brok`, add an entry under
+`Dependencies.PackageDependencies` in its installer manifest with
+`PackageIdentifier: Brokspace.BrokAgent` and `MinimumVersion` set to the oldest
+agent version compatible with this brok release. Submit the agent package first
+so the dependency is available. After installing Brok, verify both
+`brok --version` and `brok-agent --version`. The command offers to submit the
+pull request.
 
 ### 2.2 Validate before submitting
 
