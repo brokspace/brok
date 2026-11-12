@@ -176,6 +176,7 @@ same PR.
         with:
           identifier: Brokspace.Brok   # Brokspace.BrokAgent / Brokspace.BrokspaceIDE
           installers-regex: 'windows-x86_64\.exe$'   # IDE: 'windows-x64-setup\.exe$'
+          fork-user: <fork-owner> # Account used in step 1
           token: ${{ secrets.WINGET_TOKEN }}
 ```
 
