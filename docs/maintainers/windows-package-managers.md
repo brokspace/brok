@@ -159,7 +159,7 @@ same PR.
 
 ### 2.4 Automate updates
 
-1. Create a **classic** personal access token with the `public_repo` scope
+1. Create a **classic** personal access token with the `public_repo` and `workflow` scopes
    (GitHub > Settings > Developer settings > Personal access tokens >
    Tokens (classic)). It must belong to an account with a fork of
    `microsoft/winget-pkgs`; fork it first.
