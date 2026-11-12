@@ -78,7 +78,7 @@ pub enum Kind {
     Decision,
     /// A fact about the code, the system or the team.
     Fact,
-    /// A summary of a working session (saved by the IDE).
+    /// A summary of a working session (saved by editor extensions).
     Session,
     /// Where work stopped and what comes next.
     Handoff,

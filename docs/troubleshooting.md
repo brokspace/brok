@@ -35,7 +35,7 @@ per month). They stay on your machine: nothing is sent anywhere.
 ```sh
 brok stats            # the last 7 days
 brok stats --days 30
-brok stats --json     # for scripts and the IDE
+brok stats --json     # for scripts and editors
 ```
 
 ```text
@@ -85,7 +85,7 @@ report file for the log and the configuration.
 |---|---|
 | `brok` (default) | The CLI, indexing, search, memory, links, MCP |
 | `brok-agent` | Answers, reviews, commit messages, skills on your LLM |
-| `ide` | Brokspace IDE |
+| `ide` | Brokspace IDE (discontinued: editor extensions replace it) |
 
 Editors call `brok bug --json` (with `--title`, `--what-happened`,
 `--context` for their own versions) and open the returned `url` themselves.

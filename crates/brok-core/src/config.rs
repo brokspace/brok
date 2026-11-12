@@ -141,7 +141,7 @@ impl Default for MetricsConfig {
 pub struct MemoryConfig {
     /// Search memories and let tools save them.
     pub enabled: bool,
-    /// Save IDE chat sessions as memories.
+    /// Save editor chat sessions (the Brokspace chat in an editor) as memories.
     pub sessions: bool,
     /// Include the user's global memories, shared by every workspace.
     pub global: bool,

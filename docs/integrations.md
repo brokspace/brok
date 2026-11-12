@@ -64,7 +64,7 @@ llm:
 
 ## Editors and scripts: JSON output
 
-Editors (the Brokspace IDE among them), scripts and CI read brok through
+Editor extensions, scripts and CI read brok through
 `--json`. Shapes are stable within a minor version.
 
 | Command | Output |

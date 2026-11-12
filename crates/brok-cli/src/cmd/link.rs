@@ -1,7 +1,7 @@
 //! `brok link`: workspaces this one depends on (`workspace.links`).
 //!
 //! A linked workspace's code and memories are searched with this one's, so
-//! `brok ask`, the IDE and coding agents know about the services and
+//! `brok ask`, editors and coding agents know about the services and
 //! libraries the code calls.
 
 use std::path::Path;
