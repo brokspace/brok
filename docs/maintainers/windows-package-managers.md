@@ -174,6 +174,7 @@ same PR.
     steps:
       - uses: vedantmgoyal9/winget-releaser@main
         with:
+          release-tag: ${{ inputs.tag || github.ref_name }}
           identifier: Brokspace.Brok   # Brokspace.BrokAgent / Brokspace.BrokspaceIDE
           installers-regex: 'windows-x86_64\.exe$'   # IDE: 'windows-x64-setup\.exe$'
           fork-user: <fork-owner> # Account used in step 1
