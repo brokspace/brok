@@ -26,14 +26,35 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { platform: linux-x86_64, os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          # Built on Ubuntu 20.04, not on the runner's newest image: a binary
+          # links against the glibc it is built with and needs at least that
+          # version, so ubuntu-latest binaries only ran on the newest distros.
+          - { platform: linux-x86_64, os: ubuntu-latest, container: "ubuntu:20.04", max_glibc: "2.31", target: x86_64-unknown-linux-gnu }
           - { platform: linux-aarch64, os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
           - { platform: macos-aarch64, os: macos-latest, target: aarch64-apple-darwin }
           # ONNX Runtime ships no prebuilt binaries for Intel Macs: text search there.
           - { platform: macos-x86_64, os: macos-latest, target: x86_64-apple-darwin, features: "--no-default-features --features ast,lancedb" }
           - { platform: windows-x86_64, os: windows-latest, target: x86_64-pc-windows-msvc, ext: .exe }
     runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
     steps:
+      # gcc-13 is needed by the prebuilt ONNX Runtime (C++20 standard library);
+      # libssl-dev only by the ort build script that downloads it.
+      - name: Install the build tools (Ubuntu 20.04 container)
+        if: matrix.container
+        shell: bash
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential ca-certificates cmake curl git gpg-agent libssl-dev perl pkg-config software-properties-common unzip
+          add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc-13 g++-13
+          # gh uploads the release asset
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gh
       - uses: actions/checkout@v7
         with:
           path: brok
@@ -63,9 +84,33 @@ jobs:
         if: startsWith(matrix.os, 'macos')
         run: echo "RUSTFLAGS=-C link-arg=$(clang --print-resource-dir)/lib/darwin/libclang_rt.osx.a" >> "$GITHUB_ENV"
       - name: Build
+        if: ${{ !matrix.container }}
         working-directory: brok
         shell: bash
         run: cargo build --release -p brok-cli --target ${{ matrix.target }} ${{ matrix.features }}
+      - name: Build (portable Linux)
+        if: matrix.container
+        working-directory: brok
+        shell: bash
+        run: scripts/build-linux-compat.sh
+      # Fails the release if the binary needs a newer glibc than promised, or
+      # a libssl or libstdc++ the machine may not have.
+      - name: Check the binary's dependencies
+        if: matrix.max_glibc
+        working-directory: brok
+        shell: bash
+        run: |
+          bin="target/${{ matrix.target }}/release/brok"
+          needed="$(readelf -d "$bin" | grep NEEDED)"
+          echo "$needed"
+          if echo "$needed" | grep -E 'libssl|libcrypto|libstdc\+\+'; then
+            echo "::error::brok must not depend on the system libssl or libstdc++"; exit 1
+          fi
+          highest="$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -V | tail -1)"
+          echo "highest glibc symbol: $highest (limit ${{ matrix.max_glibc }})"
+          if [ "$(printf '%s\n' "$highest" "${{ matrix.max_glibc }}" | sort -V | tail -1)" != "${{ matrix.max_glibc }}" ]; then
+            echo "::error::brok needs glibc $highest, more than ${{ matrix.max_glibc }}"; exit 1
+          fi
       - name: Package
         shell: bash
         working-directory: brok
