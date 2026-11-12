@@ -81,7 +81,7 @@ asset `brok-agent-windows-x86_64.exe`), and add `"depends": "brok-agent"` to
     }
   },
   "innosetup": false,
-  "installer": { "file": "BrokspaceIDE-0.3.0-windows-x64-setup.exe", "args": ["/S"] },
+  "installer": { "args": ["/S"] },
   "checkver": "github",
   "autoupdate": {
     "architecture": {
