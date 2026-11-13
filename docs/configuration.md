@@ -76,8 +76,8 @@ applies it to every new workspace, so you choose a model once per machine.
 
 | Key | Default | Description |
 |---|---|---|
-| `enabled` | `true` | Search memories with the code and let `brok memory`, the IDE and MCP tools save them. |
-| `sessions` | `true` | Save IDE chat sessions as `session` memories. |
+| `enabled` | `true` | Search memories with the code and let `brok memory`, editor extensions and MCP tools save them. |
+| `sessions` | `true` | Save chats with the Brokspace agent in your editor as `session` memories. |
 | `global` | `true` | Search your global memories (every workspace) here too. |
 
 See [memory.md](memory.md) for where memories live and how they are captured.

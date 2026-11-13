@@ -1,6 +1,9 @@
 # Windows package managers: winget and Scoop
 
 **For:** maintainers who release `brok`, `brok-agent` and Brokspace IDE.
+
+> Brokspace IDE is discontinued (editor extensions replace it): skip its
+> entries below. They stay for reference until the `ide` repository is archived.
 **Time:** about 1 hour, once, plus waiting for the winget review.
 
 Managed Windows machines block `irm | iex` (see
