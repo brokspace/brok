@@ -45,7 +45,7 @@ pub struct Args {
     /// Repository: brok (the CLI), brok-agent (answers, reviews) or ide.
     #[arg(long, default_value = "brok", value_parser = REPOS)]
     repo: String,
-    /// More environment details (the IDE adds its versions here).
+    /// More environment details (editor extensions add their versions here).
     #[arg(long, value_name = "TEXT")]
     context: Option<String>,
     /// Where to save the full report (default: .brokspace/reports/).
