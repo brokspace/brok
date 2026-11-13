@@ -23,8 +23,12 @@ onnx = ["brok-index/onnx"]
 cuda = ["brok-index/cuda"]
 coreml = ["brok-index/coreml"]
 directml = ["brok-index/directml"]
+# Builds OpenSSL into the binary (needs perl and a C compiler), so the release
+# binary does not depend on the libssl version of the machine it runs on.
+vendored-openssl = ["dep:openssl", "openssl/vendored"]
 
 [dependencies]
+openssl = { version = "0.10", optional = true }
 clap_complete.workspace = true
 brok-bus.workspace = true
 brok-core.workspace = true
