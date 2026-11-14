@@ -431,11 +431,21 @@ impl BrokConfig {
         })
     }
 
-    /// Writes the config as YAML. The explanations of the default template
-    /// are kept next to the keys they describe; other comments are not.
+    /// Writes the config as YAML while preserving the existing file's comments,
+    /// formatting, and key order.
     pub fn save(&self, path: &Path) -> Result<()> {
         let yaml = serde_yaml_ng::to_string(self).map_err(|e| CoreError::Config(e.to_string()))?;
-        crate::fsutil::write_atomic(path, annotate(&yaml, DEFAULT_TEMPLATE).as_bytes())
+        let existing = match std::fs::read_to_string(path) {
+            Ok(existing) => existing,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => DEFAULT_TEMPLATE.to_owned(),
+            Err(error) => return Err(CoreError::io(path, error)),
+        };
+        let merged = merge_yaml(&existing, &yaml);
+        let merged = match Self::from_yaml(&merged) {
+            Ok(parsed) if parsed == *self => merged,
+            _ => yaml,
+        };
+        crate::fsutil::write_atomic(path, merged.as_bytes())
     }
 
     /// Semantic checks that serde cannot express.
@@ -505,73 +515,252 @@ pub fn is_link_name(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
-/// Copies the comments of `template` into `yaml` (block-style YAML as serde
-/// writes it): the leading header goes first, and every other comment block
-/// lands above the same key or list item. Top-level sections are separated by
-/// a blank line, like in the template.
-fn annotate(yaml: &str, template: &str) -> String {
-    let mut header = Vec::new();
-    let mut comments: BTreeMap<String, Vec<&str>> = BTreeMap::new();
-    let mut pending = Vec::new();
-    let mut locator = Locator::default();
-    for line in template.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('#') {
-            pending.push(trimmed);
-        } else if let Some(location) = locator.locate(line) {
-            if header.is_empty() && comments.is_empty() && location.path() == "version" {
-                header = std::mem::take(&mut pending);
-            } else if !pending.is_empty() {
-                comments.insert(location.path().to_owned(), std::mem::take(&mut pending));
-            }
-        }
+/// A block-style YAML key and its location in the source lines.
+struct KeyLine {
+    path: Vec<String>,
+    index: usize,
+    indent: usize,
+    has_children: bool,
+}
+
+/// Merges serde's block-style YAML into an existing block-style document.
+/// Hand-written block lists nested under their keys are supported; flow-style
+/// mappings and unusual YAML constructs fall back to serialization in `save`.
+fn merge_yaml(existing: &str, serialized: &str) -> String {
+    let desired_lines: Vec<String> = serialized.lines().map(str::to_owned).collect();
+    let mut lines: Vec<String> = existing.lines().map(str::to_owned).collect();
+    let desired_keys = key_lines(&desired_lines);
+    let desired_paths: std::collections::BTreeSet<Vec<String>> =
+        desired_keys.iter().map(|key| key.path.clone()).collect();
+
+    let mut obsolete: Vec<KeyLine> =
+        key_lines(&lines).into_iter().filter(|key| !desired_paths.contains(&key.path)).collect();
+    obsolete.sort_by_key(|key| std::cmp::Reverse(key.index));
+    let obsolete_paths: std::collections::BTreeSet<Vec<String>> = obsolete.iter().map(|key| key.path.clone()).collect();
+    obsolete.retain(|key| !(1..key.path.len()).any(|length| obsolete_paths.contains(&key.path[..length])));
+    for key in obsolete {
+        let end = block_end(&lines, &key);
+        lines.drain(key.index..end);
     }
 
-    let mut out = String::new();
-    for line in header {
-        out.push_str(line);
-        out.push('\n');
+    for desired in desired_keys {
+        let current_keys = key_lines(&lines);
+        let desired_descendants = key_lines(&desired_lines)
+            .iter()
+            .any(|key| key.path.len() > desired.path.len() && key.path.starts_with(&desired.path));
+        if let Some(current) = current_keys.iter().find(|key| key.path == desired.path) {
+            if desired_descendants {
+                if !current.has_children {
+                    let desired_header = &desired_lines[desired.index];
+                    lines[current.index] = replace_yaml_value(&lines[current.index], desired_header);
+                }
+            } else {
+                let desired_block = yaml_block(&desired_lines, desired.index, desired.indent);
+                let current_end = block_end(&lines, current);
+                let delta = current.indent as isize - desired.indent as isize;
+                let mut replacement = reindent_block(&desired_block, delta);
+                preserve_block_comments(&lines[current.index..current_end], &mut replacement);
+                lines.splice(current.index..current_end, replacement);
+            }
+            continue;
+        }
+
+        let mut block = yaml_block(&desired_lines, desired.index, desired.indent);
+        let parent_path = desired.path[..desired.path.len().saturating_sub(1)].to_vec();
+        let insertion = if parent_path.is_empty() {
+            let mut index = lines.len();
+            if index > 0 && !lines[index - 1].trim().is_empty() {
+                lines.insert(index, String::new());
+                index += 1;
+            }
+            index
+        } else {
+            let Some(parent) = current_keys.iter().find(|key| key.path == parent_path) else {
+                continue;
+            };
+            if !parent.has_children {
+                lines[parent.index] = replace_yaml_value(&lines[parent.index], "");
+            }
+            let refreshed = key_lines(&lines);
+            let Some(parent) = refreshed.iter().find(|key| key.path == parent_path) else {
+                continue;
+            };
+            let child_indent = refreshed
+                .iter()
+                .filter(|key| {
+                    key.path.len() > parent_path.len()
+                        && key.path.starts_with(&parent_path)
+                        && key.indent > parent.indent
+                })
+                .map(|key| key.indent)
+                .min()
+                .unwrap_or(parent.indent + 2);
+            let desired_indent = desired.indent;
+            let delta = child_indent as isize - desired_indent as isize;
+            block = reindent_block(&block, delta);
+            insertion_index(&lines, parent)
+        };
+        lines.splice(insertion..insertion, block);
     }
+
+    let line_ending = if existing.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut output = lines.join(line_ending);
+    output.push_str(line_ending);
+    output
+}
+
+fn key_lines(lines: &[String]) -> Vec<KeyLine> {
     let mut locator = Locator::default();
-    let mut first = true;
-    for line in yaml.lines() {
-        if let Some(location) = locator.locate(line) {
+    let mut keys = Vec::new();
+
+    for (index, line) in lines.iter().enumerate() {
+        let Some(Located::Key(path)) = locator.locate(line) else {
+            continue;
+        };
+        let indent = line.len() - line.trim_start().len();
+        let has_children = lines[index + 1..]
+            .iter()
+            .find_map(|next| {
+                let trimmed = next.trim_start();
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    return None;
+                }
+                let next_indent = next.len() - trimmed.len();
+                Some(next_indent > indent || (trimmed.starts_with('-') && next_indent >= indent))
+            })
+            .unwrap_or(false);
+        keys.push(KeyLine { path, index, indent, has_children });
+    }
+    keys
+}
+
+fn yaml_block(lines: &[String], start: usize, indent: usize) -> Vec<String> {
+    let mut end = start + 1;
+    for (index, line) in lines.iter().enumerate().skip(start + 1) {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let line_indent = line.len() - trimmed.len();
+        if line_indent <= indent && !(trimmed.starts_with('-') && line_indent >= indent) {
+            break;
+        }
+        end = index + 1;
+    }
+    lines[start..end].to_vec()
+}
+
+/// Finds the end of a key's indented block, including its indented comments.
+fn block_end(lines: &[String], key: &KeyLine) -> usize {
+    let mut end = key.index + 1;
+    for (index, line) in lines.iter().enumerate().skip(key.index + 1) {
+        let trimmed = line.trim_start();
+        let indent = line.len() - trimmed.len();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            if indent > key.indent {
+                end = index + 1;
+                continue;
+            }
+            break;
+        }
+        if indent <= key.indent && !(trimmed.starts_with('-') && indent >= key.indent) {
+            break;
+        }
+        end = index + 1;
+    }
+    end
+}
+
+fn reindent_block(block: &[String], delta: isize) -> Vec<String> {
+    block
+        .iter()
+        .map(|line| {
+            if line.trim().is_empty() {
+                return String::new();
+            }
             let indent = line.len() - line.trim_start().len();
-            if matches!(location, Located::Key(_)) && indent == 0 && !std::mem::take(&mut first) {
-                out.push('\n');
-            }
-            for comment in comments.remove(location.path()).unwrap_or_default() {
-                out.push_str(&" ".repeat(indent));
-                out.push_str(comment);
-                out.push('\n');
-            }
-        }
-        out.push_str(line);
-        out.push('\n');
-    }
-    out
+            let adjusted = (indent as isize + delta).max(0) as usize;
+            format!("{}{}", " ".repeat(adjusted), line.trim_start())
+        })
+        .collect()
 }
 
-/// Where a YAML line sits: `index.exclude` for a key, `index.exclude[]**/*.lock`
-/// for a list item.
+fn preserve_block_comments(old: &[String], replacement: &mut Vec<String>) {
+    let mut scalar_indent = None;
+    for line in old {
+        let trimmed = line.trim_start();
+        let indent = line.len() - trimmed.len();
+        if let Some(level) = scalar_indent {
+            if trimmed.is_empty() || indent > level {
+                continue;
+            }
+            scalar_indent = None;
+        }
+        if trimmed.starts_with('#') {
+            if !replacement.iter().any(|existing| existing.trim() == trimmed) {
+                replacement.push(line.clone());
+            }
+            continue;
+        }
+        if let Some((_, value)) = trimmed.split_once(':') {
+            let value = value.trim_start();
+            if value.starts_with('|') || value.starts_with('>') {
+                scalar_indent = Some(indent);
+            }
+        }
+    }
+}
+
+fn insertion_index(lines: &[String], parent: &KeyLine) -> usize {
+    let mut end = parent.index + 1;
+    for (index, line) in lines.iter().enumerate().skip(parent.index + 1) {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            let indent = line.len() - trimmed.len();
+            if indent > parent.indent {
+                end = index + 1;
+            }
+            continue;
+        }
+        let indent = line.len() - trimmed.len();
+        if indent <= parent.indent && !(trimmed.starts_with('-') && indent >= parent.indent) {
+            break;
+        }
+        end = index + 1;
+    }
+    end
+}
+
+fn replace_yaml_value(existing: &str, desired: &str) -> String {
+    let Some(colon) = existing.find(':') else {
+        return desired.to_owned();
+    };
+    let desired_value = desired.find(':').map(|desired_colon| desired[desired_colon + 1..].trim()).unwrap_or(desired);
+    let after_colon = &existing[colon + 1..];
+    let spacing = after_colon.len() - after_colon.trim_start().len();
+    let comment = inline_comment_start(existing)
+        .map(|comment_index| {
+            let mut start = comment_index;
+            while start > colon + 1 + spacing && existing.as_bytes()[start - 1].is_ascii_whitespace() {
+                start -= 1;
+            }
+            &existing[start..]
+        })
+        .unwrap_or("");
+
+    format!("{}{}{}{}", &existing[..=colon], &after_colon[..spacing], desired_value, comment)
+}
+
 enum Located {
-    Key(String),
-    Item(String),
+    Key(Vec<String>),
+    Item,
 }
 
-impl Located {
-    fn path(&self) -> &str {
-        match self {
-            Located::Key(path) | Located::Item(path) => path,
-        }
-    }
-}
-
-/// Tracks the key path of block-style YAML, one line at a time. List items
-/// may be indented under their key (hand-written) or level with it (serde).
 #[derive(Default)]
+/// Tracks nested plain YAML keys; quoted keys containing `:` are not supported.
 struct Locator {
     stack: Vec<(usize, String)>,
+    block_scalar_indent: Option<usize>,
 }
 
 impl Locator {
@@ -579,27 +768,58 @@ impl Locator {
         let content = line.trim_start();
         let indent = line.len() - content.len();
         let content = content.trim_end();
+        if let Some(level) = self.block_scalar_indent {
+            if content.is_empty() || indent > level {
+                return None;
+            }
+            self.block_scalar_indent = None;
+        }
         if content.is_empty() || content.starts_with('#') {
             return None;
         }
-        let unquote = |s: &str| s.trim().trim_matches(['"', '\'']).to_owned();
-        if let Some(item) = content.strip_prefix('-') {
-            while self.stack.last().is_some_and(|(i, _)| *i > indent) {
+        let unquote = |value: &str| value.trim().trim_matches(['"', '\'']).to_owned();
+        if content.starts_with('-') {
+            while self.stack.last().is_some_and(|(level, _)| *level > indent) {
                 self.stack.pop();
             }
-            return Some(Located::Item(format!("{}[]{}", self.path(), unquote(item))));
+            return Some(Located::Item);
         }
-        let (key, _) = content.split_once(':')?;
-        while self.stack.last().is_some_and(|(i, _)| *i >= indent) {
+        let (key, value) = content.split_once(':')?;
+        while self.stack.last().is_some_and(|(level, _)| *level >= indent) {
             self.stack.pop();
         }
         self.stack.push((indent, unquote(key)));
-        Some(Located::Key(self.path()))
+        let value = value.trim_start();
+        if value.starts_with('|') || value.starts_with('>') {
+            self.block_scalar_indent = Some(indent);
+        }
+        Some(Located::Key(self.stack.iter().map(|(_, key)| key.clone()).collect()))
     }
+}
 
-    fn path(&self) -> String {
-        self.stack.iter().map(|(_, key)| key.as_str()).collect::<Vec<_>>().join(".")
+fn inline_comment_start(line: &str) -> Option<usize> {
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, character) in line.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\' && quote == Some('\"') {
+            escaped = true;
+            continue;
+        }
+        if let Some(active_quote) = quote {
+            if character == active_quote {
+                quote = None;
+            }
+        } else if character == '\"' || character == '\'' {
+            quote = Some(character);
+        } else if character == '#' && index > 0 && line[..index].chars().next_back().is_some_and(char::is_whitespace) {
+            return Some(index);
+        }
     }
+    None
 }
 
 #[cfg(test)]
@@ -607,28 +827,236 @@ mod tests {
     use super::*;
 
     #[test]
-    fn save_keeps_the_template_comments() {
+    fn save_preserves_existing_comments_and_key_order() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("brok.yml");
-        let mut config = BrokConfig::from_yaml(DEFAULT_TEMPLATE).unwrap();
+        let original = DEFAULT_TEMPLATE
+            .replace("version: 1\n", "version: 1\n# Keep this custom header comment.\n")
+            .replace(
+                "      model: qwen2.5-coder:7b\n",
+                "      # Keep this custom provider comment.\n      model: qwen2.5-coder:7b\n",
+            )
+            .replace(
+                "# Mirror the index to shared storage.",
+                "# Keep this custom sync comment.\n# Mirror the index to shared storage.",
+            );
+        std::fs::write(&path, &original).unwrap();
+
+        let mut config = BrokConfig::from_yaml(&original).unwrap();
+        config.llm.default = "lmstudio".into();
         config.llm.providers.get_mut("ollama").unwrap().model = "qwen2.5-coder:1.5b".into();
+        config.embeddings.enabled = false;
+        config.sync.backend = SyncBackend::GitLfs;
         config.save(&path).unwrap();
 
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.starts_with("# Brokspace workspace configuration.\n"), "{text}");
-        for comment in [
-            "  # Glob patterns, relative to the workspace root.",
-            "  # Lock files: large, generated",
-            "  # Disable to run on BM25",
-            "  # Provider used by `brok ask`",
-            "      # Seconds between `git diff` scans.",
-            "# Mirror the index to shared storage.",
-        ] {
-            assert!(text.contains(comment), "`{comment}` missing:\n{text}");
+        for comment in original.lines().filter(|line| line.trim_start().starts_with('#')) {
+            assert!(text.contains(comment), "comment `{comment}` was lost:\n{text}");
         }
-        assert!(text.contains("\n\nindex:\n"), "{text}");
-        assert!(text.contains("qwen2.5-coder:1.5b"));
+        assert!(text.contains("  default: lmstudio"));
+        assert!(text.contains("      model: qwen2.5-coder:1.5b"));
+        assert!(text.contains("  enabled: false"));
+        assert!(text.contains("  backend: git-lfs"));
+
+        let sections =
+            ["workspace:", "index:", "embeddings:", "search:", "memory:", "metrics:", "llm:", "sync:", "shards:"];
+        let positions: Vec<_> = sections.iter().map(|section| text.find(section).unwrap()).collect();
+        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "{text}");
         assert_eq!(BrokConfig::load(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn save_inserts_new_keys_into_their_existing_sections() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brok.yml");
+        let mut config = BrokConfig::from_yaml(DEFAULT_TEMPLATE).unwrap();
+        config.llm.providers.get_mut("ollama").unwrap().temperature = Some(0.25);
+        config.sync.backend = SyncBackend::S3;
+        config.sync.remote = Some(RemoteStore {
+            bucket: "brok-index".into(),
+            prefix: "shared".into(),
+            region: Some("us-east-1".into()),
+            endpoint: None,
+            access_key_env: "AWS_ACCESS_KEY_ID".into(),
+            secret_key_env: "AWS_SECRET_ACCESS_KEY".into(),
+        });
+        config.save(&path).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        let ollama = text.find("    ollama:").unwrap();
+        let model = text.find("      model: qwen2.5-coder:7b").unwrap();
+        let temperature = text.find("      temperature: 0.25").unwrap();
+        let next_provider = text.find("    lmstudio:").unwrap();
+        assert!(ollama < model && model < temperature && temperature < next_provider, "{text}");
+
+        let sync = text.find("sync:\n").unwrap();
+        let backend = text.find("  backend: s3").unwrap();
+        let remote = text.find("  remote:\n").unwrap();
+        let bucket = text.find("    bucket: brok-index").unwrap();
+        assert!(sync < backend && backend < remote && remote < bucket, "{text}");
+        assert_eq!(BrokConfig::load(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn save_removes_deleted_links_and_optional_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brok.yml");
+        let mut config = BrokConfig::from_yaml(DEFAULT_TEMPLATE).unwrap();
+        config.workspace.links.insert("shared".into(), LinkConfig::local("../shared"));
+        config.llm.providers.get_mut("ollama").unwrap().temperature = Some(0.4);
+        config.save(&path).unwrap();
+
+        config.workspace.links.remove("shared");
+        config.llm.providers.get_mut("ollama").unwrap().temperature = None;
+        config.save(&path).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("shared:"));
+        assert!(!text.contains("temperature:"));
+        assert_eq!(BrokConfig::load(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn save_removes_deleted_keys_with_inline_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brok.yml");
+        let mut config = BrokConfig::from_yaml(DEFAULT_TEMPLATE).unwrap();
+        config.llm.providers.get_mut("ollama").unwrap().temperature = Some(0.4);
+        config.save(&path).unwrap();
+
+        let original = std::fs::read_to_string(&path).unwrap();
+        let original = original.replace("      temperature: 0.4", "      temperature: 0.4 # remove with this setting");
+        std::fs::write(&path, original).unwrap();
+
+        config.llm.providers.get_mut("ollama").unwrap().temperature = None;
+        config.save(&path).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("temperature:"));
+        assert!(!text.contains("remove with this setting"));
+        assert_eq!(BrokConfig::load(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn save_handles_empty_and_comment_only_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let empty_path = dir.path().join("empty.yml");
+        let comments_path = dir.path().join("comments.yml");
+        std::fs::write(&empty_path, "").unwrap();
+        std::fs::write(&comments_path, "# Keep this file-level note.\n").unwrap();
+
+        let config = BrokConfig::default();
+        config.save(&empty_path).unwrap();
+        config.save(&comments_path).unwrap();
+
+        assert_eq!(BrokConfig::load(&empty_path).unwrap(), config);
+        let comments = std::fs::read_to_string(&comments_path).unwrap();
+        assert!(comments.contains("# Keep this file-level note."));
+        assert_eq!(BrokConfig::load(&comments_path).unwrap(), config);
+    }
+
+    #[test]
+    fn save_preserves_crlf_line_endings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brok.yml");
+        let original = DEFAULT_TEMPLATE.replace("\n", "\r\n");
+        std::fs::write(&path, &original).unwrap();
+
+        let mut config = BrokConfig::from_yaml(&original).unwrap();
+        config.embeddings.enabled = false;
+        config.save(&path).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.replace("\r\n", "").contains('\n'));
+        assert_eq!(BrokConfig::load(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn save_falls_back_when_existing_yaml_cannot_be_merged_safely() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brok.yml");
+        let original = "version: 1\nindex:\n  include: &patterns [\"**/*\"]\n  exclude: *patterns\n";
+        std::fs::write(&path, original).unwrap();
+
+        let mut config = BrokConfig::from_yaml(original).unwrap();
+        config.index.include = vec!["src/**".into()];
+        config.save(&path).unwrap();
+
+        assert_eq!(BrokConfig::load(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn save_replaces_sequences_and_multiline_scalars() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brok.yml");
+        let mut config = BrokConfig::from_yaml(DEFAULT_TEMPLATE).unwrap();
+        config.index.include = vec!["src/**".into(), "tests/**".into()];
+        config.workspace.links.insert(
+            "docs".into(),
+            LinkConfig {
+                path: Some("../docs".into()),
+                description: Some("First line\nOriginal second line".into()),
+                ..LinkConfig::default()
+            },
+        );
+        config.save(&path).unwrap();
+
+        config.index.include = vec!["src/**".into(), "crates/**".into()];
+        config.workspace.links.get_mut("docs").unwrap().description = Some("First line\nUpdated second line".into());
+        config.save(&path).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("- src/**"), "{text}");
+        assert!(text.contains("- crates/**"), "{text}");
+        assert!(!text.contains("- tests/**"), "{text}");
+        assert!(!text.contains("Original second line"), "{text}");
+        assert!(text.contains("Updated second line"), "{text}");
+        assert_eq!(BrokConfig::load(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn save_supports_dotted_link_names_and_empty_mappings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brok.yml");
+        let original = DEFAULT_TEMPLATE.replace("  links: {}", "  links:\n    existing:\n      path: ../existing");
+        std::fs::write(&path, &original).unwrap();
+        let mut config = BrokConfig::from_yaml(&original).unwrap();
+        config.workspace.links.insert("shared.lib".into(), LinkConfig::local("../shared"));
+        config.save(&path).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("shared.lib:"), "{text}");
+        assert_eq!(BrokConfig::load(&path).unwrap(), config);
+
+        let empty_mapping_path = dir.path().join("empty-links.yml");
+        let mut empty_mapping_config = BrokConfig::from_yaml(DEFAULT_TEMPLATE).unwrap();
+        empty_mapping_config.workspace.links.insert("shared.lib".into(), LinkConfig::local("../shared"));
+        empty_mapping_config.save(&empty_mapping_path).unwrap();
+        assert_eq!(BrokConfig::load(&empty_mapping_path).unwrap(), empty_mapping_config);
+    }
+
+    #[test]
+    fn save_reindents_inserted_keys_to_existing_parent_children() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brok.yml");
+        let original = DEFAULT_TEMPLATE.replace(
+            "    ollama:\n      base_url: http://localhost:11434/v1\n      model: qwen2.5-coder:7b\n",
+            "    ollama:\n        base_url: http://localhost:11434/v1\n        model: qwen2.5-coder:7b\n",
+        );
+        std::fs::write(&path, &original).unwrap();
+        let mut config = BrokConfig::from_yaml(&original).unwrap();
+        config.llm.providers.get_mut("ollama").unwrap().temperature = Some(0.25);
+        config.save(&path).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("        temperature: 0.25"), "{text}");
+        assert_eq!(BrokConfig::load(&path).unwrap(), config);
+    }
+
+    #[test]
+    fn replace_yaml_value_handles_non_ascii_spacing() {
+        let updated = replace_yaml_value("value:\u{a0}old", "value: new");
+        assert_eq!(updated, "value:\u{a0}new");
     }
 
     #[test]
