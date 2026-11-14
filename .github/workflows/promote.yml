@@ -1,8 +1,10 @@
 name: Promote
 
+# Promotes staging to main and releases from the Conventional Commits: version PR, tag vX.Y.Z, release.yml.
+# See brokspace/.github, "Zero-touch releases".
 on:
   push:
-    branches: [staging]
+    branches: [staging, main]
 
 permissions:
   contents: read
@@ -12,3 +14,6 @@ permissions:
 jobs:
   promote:
     uses: brokspace/.github/.github/workflows/promote.yml@main
+    with:
+      release: true
+    secrets: inherit
