@@ -6,10 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-14
+
 ### Fixed
 
-
-- Preserve YAML comments and ordering while safely reconciling configuration values, lists, removed keys and nested links.
+- Saving brok.yml (`brok config set`, `brok link`, editor settings) keeps
+  your comments, key order and line endings, and adds new keys in their
+  section. A file that cannot be merged safely is written as before.
 - The Linux x86_64 binary ran only on the newest distributions: it was built
   on `ubuntu-latest` and needed its glibc (2.43) and libssl 3. It is now built
   on Ubuntu 20.04 with OpenSSL and libstdc++ linked in, so it runs on glibc
