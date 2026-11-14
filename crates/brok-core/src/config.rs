@@ -533,18 +533,11 @@ fn merge_yaml(existing: &str, serialized: &str) -> String {
     let desired_paths: std::collections::BTreeSet<Vec<String>> =
         desired_keys.iter().map(|key| key.path.clone()).collect();
 
-    let mut obsolete: Vec<KeyLine> = key_lines(&lines)
-        .into_iter()
-        .filter(|key| {
-            !desired_paths.contains(&key.path)
-        })
-        .collect();
+    let mut obsolete: Vec<KeyLine> =
+        key_lines(&lines).into_iter().filter(|key| !desired_paths.contains(&key.path)).collect();
     obsolete.sort_by_key(|key| std::cmp::Reverse(key.index));
-    let obsolete_paths: std::collections::BTreeSet<Vec<String>> =
-        obsolete.iter().map(|key| key.path.clone()).collect();
-    obsolete.retain(|key| {
-        !(1..key.path.len()).any(|length| obsolete_paths.contains(&key.path[..length]))
-    });
+    let obsolete_paths: std::collections::BTreeSet<Vec<String>> = obsolete.iter().map(|key| key.path.clone()).collect();
+    obsolete.retain(|key| !(1..key.path.len()).any(|length| obsolete_paths.contains(&key.path[..length])));
     for key in obsolete {
         let end = block_end(&lines, &key);
         lines.drain(key.index..end);
@@ -554,8 +547,7 @@ fn merge_yaml(existing: &str, serialized: &str) -> String {
         let current_keys = key_lines(&lines);
         let desired_descendants = key_lines(&desired_lines)
             .iter()
-            .any(|key| key.path.len() > desired.path.len()
-                && key.path.starts_with(&desired.path));
+            .any(|key| key.path.len() > desired.path.len() && key.path.starts_with(&desired.path));
         if let Some(current) = current_keys.iter().find(|key| key.path == desired.path) {
             if desired_descendants {
                 if !current.has_children {
@@ -593,10 +585,13 @@ fn merge_yaml(existing: &str, serialized: &str) -> String {
             let Some(parent) = refreshed.iter().find(|key| key.path == parent_path) else {
                 continue;
             };
-            let child_indent = refreshed.iter()
-                .filter(|key| key.path.len() > parent_path.len()
-                    && key.path.starts_with(&parent_path)
-                    && key.indent > parent.indent)
+            let child_indent = refreshed
+                .iter()
+                .filter(|key| {
+                    key.path.len() > parent_path.len()
+                        && key.path.starts_with(&parent_path)
+                        && key.indent > parent.indent
+                })
                 .map(|key| key.indent)
                 .min()
                 .unwrap_or(parent.indent + 2);
@@ -623,14 +618,17 @@ fn key_lines(lines: &[String]) -> Vec<KeyLine> {
             continue;
         };
         let indent = line.len() - line.trim_start().len();
-        let has_children = lines[index + 1..].iter().find_map(|next| {
-            let trimmed = next.trim_start();
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                return None;
-            }
-            let next_indent = next.len() - trimmed.len();
-            Some(next_indent > indent || (trimmed.starts_with('-') && next_indent >= indent))
-        }).unwrap_or(false);
+        let has_children = lines[index + 1..]
+            .iter()
+            .find_map(|next| {
+                let trimmed = next.trim_start();
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    return None;
+                }
+                let next_indent = next.len() - trimmed.len();
+                Some(next_indent > indent || (trimmed.starts_with('-') && next_indent >= indent))
+            })
+            .unwrap_or(false);
         keys.push(KeyLine { path, index, indent, has_children });
     }
     keys
@@ -674,14 +672,17 @@ fn block_end(lines: &[String], key: &KeyLine) -> usize {
 }
 
 fn reindent_block(block: &[String], delta: isize) -> Vec<String> {
-    block.iter().map(|line| {
-        if line.trim().is_empty() {
-            return String::new();
-        }
-        let indent = line.len() - line.trim_start().len();
-        let adjusted = (indent as isize + delta).max(0) as usize;
-        format!("{}{}", " ".repeat(adjusted), line.trim_start())
-    }).collect()
+    block
+        .iter()
+        .map(|line| {
+            if line.trim().is_empty() {
+                return String::new();
+            }
+            let indent = line.len() - line.trim_start().len();
+            let adjusted = (indent as isize + delta).max(0) as usize;
+            format!("{}{}", " ".repeat(adjusted), line.trim_start())
+        })
+        .collect()
 }
 
 fn preserve_block_comments(old: &[String], replacement: &mut Vec<String>) {
@@ -734,29 +735,20 @@ fn replace_yaml_value(existing: &str, desired: &str) -> String {
     let Some(colon) = existing.find(':') else {
         return desired.to_owned();
     };
-    let desired_value = desired
-        .find(':')
-        .map(|desired_colon| desired[desired_colon + 1..].trim())
-        .unwrap_or(desired);
+    let desired_value = desired.find(':').map(|desired_colon| desired[desired_colon + 1..].trim()).unwrap_or(desired);
     let after_colon = &existing[colon + 1..];
     let spacing = after_colon.len() - after_colon.trim_start().len();
-    let comment = inline_comment_start(existing).map(|comment_index| {
-        let mut start = comment_index;
-        while start > colon + 1 + spacing
-            && existing.as_bytes()[start - 1].is_ascii_whitespace()
-        {
-            start -= 1;
-        }
-        &existing[start..]
-    }).unwrap_or("");
+    let comment = inline_comment_start(existing)
+        .map(|comment_index| {
+            let mut start = comment_index;
+            while start > colon + 1 + spacing && existing.as_bytes()[start - 1].is_ascii_whitespace() {
+                start -= 1;
+            }
+            &existing[start..]
+        })
+        .unwrap_or("");
 
-    format!(
-        "{}{}{}{}",
-        &existing[..=colon],
-        &after_colon[..spacing],
-        desired_value,
-        comment
-    )
+    format!("{}{}{}{}", &existing[..=colon], &after_colon[..spacing], desired_value, comment)
 }
 
 enum Located {
@@ -823,10 +815,7 @@ fn inline_comment_start(line: &str) -> Option<usize> {
             }
         } else if character == '\"' || character == '\'' {
             quote = Some(character);
-        } else if character == '#'
-            && index > 0
-            && line[..index].chars().next_back().is_some_and(char::is_whitespace)
-        {
+        } else if character == '#' && index > 0 && line[..index].chars().next_back().is_some_and(char::is_whitespace) {
             return Some(index);
         }
     }
@@ -869,7 +858,8 @@ mod tests {
         assert!(text.contains("  enabled: false"));
         assert!(text.contains("  backend: git-lfs"));
 
-        let sections = ["workspace:", "index:", "embeddings:", "search:", "memory:", "metrics:", "llm:", "sync:", "shards:"];
+        let sections =
+            ["workspace:", "index:", "embeddings:", "search:", "memory:", "metrics:", "llm:", "sync:", "shards:"];
         let positions: Vec<_> = sections.iter().map(|section| text.find(section).unwrap()).collect();
         assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "{text}");
         assert_eq!(BrokConfig::load(&path).unwrap(), config);
@@ -935,10 +925,7 @@ mod tests {
         config.save(&path).unwrap();
 
         let original = std::fs::read_to_string(&path).unwrap();
-        let original = original.replace(
-            "      temperature: 0.4",
-            "      temperature: 0.4 # remove with this setting",
-        );
+        let original = original.replace("      temperature: 0.4", "      temperature: 0.4 # remove with this setting");
         std::fs::write(&path, original).unwrap();
 
         config.llm.providers.get_mut("ollama").unwrap().temperature = None;
@@ -1015,8 +1002,7 @@ mod tests {
         config.save(&path).unwrap();
 
         config.index.include = vec!["src/**".into(), "crates/**".into()];
-        config.workspace.links.get_mut("docs").unwrap().description =
-            Some("First line\nUpdated second line".into());
+        config.workspace.links.get_mut("docs").unwrap().description = Some("First line\nUpdated second line".into());
         config.save(&path).unwrap();
 
         let text = std::fs::read_to_string(&path).unwrap();
@@ -1032,10 +1018,7 @@ mod tests {
     fn save_supports_dotted_link_names_and_empty_mappings() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("brok.yml");
-        let original = DEFAULT_TEMPLATE.replace(
-            "  links: {}",
-            "  links:\n    existing:\n      path: ../existing",
-        );
+        let original = DEFAULT_TEMPLATE.replace("  links: {}", "  links:\n    existing:\n      path: ../existing");
         std::fs::write(&path, &original).unwrap();
         let mut config = BrokConfig::from_yaml(&original).unwrap();
         config.workspace.links.insert("shared.lib".into(), LinkConfig::local("../shared"));
@@ -1047,10 +1030,7 @@ mod tests {
 
         let empty_mapping_path = dir.path().join("empty-links.yml");
         let mut empty_mapping_config = BrokConfig::from_yaml(DEFAULT_TEMPLATE).unwrap();
-        empty_mapping_config.workspace.links.insert(
-            "shared.lib".into(),
-            LinkConfig::local("../shared"),
-        );
+        empty_mapping_config.workspace.links.insert("shared.lib".into(), LinkConfig::local("../shared"));
         empty_mapping_config.save(&empty_mapping_path).unwrap();
         assert_eq!(BrokConfig::load(&empty_mapping_path).unwrap(), empty_mapping_config);
     }
