@@ -67,7 +67,7 @@ memory:
   # in .brokspace-memory/ (commit it), global ones in your user configuration
   # directory, for every workspace.
   enabled: true
-  # Save IDE chat sessions as memories.
+  # Save editor chat sessions as memories.
   sessions: true
   # Search your global memories here too.
   global: true

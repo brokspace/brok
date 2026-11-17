@@ -21,7 +21,7 @@ use crate::{daemon, ui};
 /// Where issues go.
 const ORG: &str = "brokspace";
 /// Repositories a report can go to.
-const REPOS: [&str; 3] = ["brok", "brok-agent", "ide"];
+const REPOS: [&str; 3] = ["brok", "brok-agent", "vscode"];
 /// Lines of the log in the report.
 const LOG_LINES: usize = 60;
 /// Characters of diagnostics put in the issue URL (GitHub limits URLs to about 8 KB).
@@ -42,10 +42,10 @@ pub struct Args {
     /// The commands or steps that show it.
     #[arg(long)]
     steps: Option<String>,
-    /// Repository: brok (the CLI), brok-agent (answers, reviews) or ide.
+    /// Repository: brok (the CLI), brok-agent (answers, reviews) or vscode.
     #[arg(long, default_value = "brok", value_parser = REPOS)]
     repo: String,
-    /// More environment details (the IDE adds its versions here).
+    /// More environment details (an editor extension adds its versions here).
     #[arg(long, value_name = "TEXT")]
     context: Option<String>,
     /// Where to save the full report (default: .brokspace/reports/).
@@ -320,9 +320,10 @@ mod tests {
     fn urls_are_encoded_and_bounded() {
         let report =
             format!("## Environment\n\n- brok 0.4.0\n\n## brok doctor\n\n{}\n## Log\n\nsecret log", "x".repeat(10_000));
-        let url = issue_url("ide", "Crash & burn", "it broke", None, Some("brok ask"), &report, Path::new("/tmp/r.md"));
+        let url =
+            issue_url("vscode", "Crash & burn", "it broke", None, Some("brok ask"), &report, Path::new("/tmp/r.md"));
         assert!(url.starts_with(
-            "https://github.com/brokspace/ide/issues/new?template=bug.yml&title=Crash%20%26%20burn&doctor="
+            "https://github.com/brokspace/vscode/issues/new?template=bug.yml&title=Crash%20%26%20burn&doctor="
         ));
         assert!(url.contains("&what-happened=it%20broke&command=brok%20ask"), "{url}");
         assert!(!url.contains("expected="));

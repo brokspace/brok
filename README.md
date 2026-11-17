@@ -176,6 +176,7 @@ searches favour the code you are working in. Details in
 | [`brok`](https://github.com/brokspace/brok) | This repo: CLI, event bus, indexer, shard runtime, built-in skills |
 | [`brok-sdk`](https://github.com/brokspace/brok-sdk) | Protocol, `shard.json` schema and client library for shards |
 | [`brok-agent`](https://github.com/brokspace/brok-agent) | The default shard: change tracking, review, answers, skills |
+| [`vscode`](https://github.com/brokspace/vscode) | Brokspace for VS Code and compatible editors |
 | [`brok-shard-template`](https://github.com/brokspace/brok-shard-template) | Template for your own shard |
 | [`example-nestjs`](https://github.com/brokspace/example-nestjs) | A NestJS project set up with Brokspace, to try it in minutes |
 
