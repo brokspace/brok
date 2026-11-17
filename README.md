@@ -71,7 +71,7 @@ check them against the `.sha256` files, rename them to `brok.exe` and
 `brok-agent.exe`, and put both in one folder on your `PATH`.
 
 Both install `brok` and `brok-agent` (checksums verified). Prebuilt
-binaries: Linux x86_64/arm64, macOS Apple Silicon, Windows x86_64, and macOS
+binaries: Linux x86_64 (glibc 2.31 or newer) and arm64, macOS Apple Silicon, Windows x86_64, and macOS
 Intel (text search only: ONNX Runtime has no Intel Mac build). Prefer Cargo?
 `cargo install brok-cli brok-agent` (needs a C compiler and `protoc`; or
 `--no-default-features` for a pure-Rust, text-search-only build).

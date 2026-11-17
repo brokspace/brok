@@ -38,7 +38,7 @@ impl Latency {
     }
 }
 
-/// Searches: by the CLI, the IDE, coding agents (MCP) and the agent.
+/// Searches: by the CLI, editors, coding agents (MCP) and the agent.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 pub struct Searches {
     /// Latency of every search.

@@ -2,7 +2,7 @@
 
 Brokspace remembers what matters between sessions, and knows about the
 other workspaces yours depends on. Both reach every way you use brok:
-`brok search` and `brok ask`, the VS Code extension, and your coding agents over MCP.
+`brok search` and `brok ask`, your editor, and your coding agents over MCP.
 
 ## Memories
 
@@ -54,11 +54,11 @@ the title.
 
 ### How memories are captured
 
-- **By you**, with `brok memory add` or in the VS Code extension (Brokspace › Memory).
+- **By you**, with `brok memory add` or in your editor.
 - **By your coding agents**: `brok mcp` offers `brok_memory_save`,
   `brok_memory_search` and `brok_memory_recent`, and tells agents to catch up
   at the start of a task and to save decisions and handoffs.
-- **By the VS Code extension**: each chat with the Brokspace agent is saved as a `session`
+- **By your editor**: each chat with the Brokspace agent is saved as a `session`
   memory, so later questions can build on it. Turn this off with
   `memory.sessions: false`.
 

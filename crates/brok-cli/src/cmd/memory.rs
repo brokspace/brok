@@ -3,7 +3,7 @@
 //! Memories are Markdown files (see `brok_core::memory`): private ones in
 //! `.brokspace/memory/`, shared ones in `.brokspace-memory/` (commit it) and
 //! global ones in the user configuration directory. Searches (`brok search`,
-//! `brok ask`, the IDE, coding agents over MCP) include them.
+//! `brok ask`, editor extensions, coding agents over MCP) include them.
 
 use std::io::Read;
 use std::path::Path;
@@ -142,7 +142,7 @@ fn add(workspace: &Workspace, dirs: &MemoryDirs, args: AddArgs) -> Result<()> {
         bail!("memory is off in this workspace (memory.enabled in brok.yml)");
     }
     if args.kind == Kind::Session && !config.sessions {
-        // Not an error: the IDE saves sessions unless told not to.
+        // Not an error: editors save sessions unless told not to.
         if args.json {
             println!("{}", json!({ "saved": false, "reason": "memory.sessions is off" }));
         } else {

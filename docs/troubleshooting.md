@@ -85,6 +85,7 @@ report file for the log and the configuration.
 |---|---|
 | `brok` (default) | The CLI, indexing, search, memory, links, MCP |
 | `brok-agent` | Answers, reviews, commit messages, skills on your LLM |
+| `ide` | Brokspace IDE (discontinued: editor extensions replace it) |
 
 Editors call `brok bug --json` (with `--title`, `--what-happened`,
 `--context` for their own versions) and open the returned `url` themselves.
