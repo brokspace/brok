@@ -1,6 +1,6 @@
 # 0010. Trust model: independent signals and verifiable evidence
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-11-22
 
 ## Context

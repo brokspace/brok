@@ -41,7 +41,14 @@ Rust and publishing manifests all say `MIT OR Apache-2.0`, with `LICENSE-MIT` an
 | `ide` | `MIT` | `LICENSE` (MIT, also Eclipse Theia copyright) | `mit` | A different license from the rest of the org; inherited from the Theia base. Decide whether this is intended |
 | `brand` | `SEE LICENSE IN LICENSE.md` | `LICENSE.md` | n/a (private) | Name and logo policy should be published separately from the code license |
 
-Maintainer decisions needed: the `vscode` license file, the `ide` license, a published name and logo policy, and DCO versus CLA before accepting outside contributions to any commercial module.
+Decisions taken (2026-11-22):
+
+- **Contributions**: inbound = outbound under `MIT OR Apache-2.0`, no CLA or sign-off, stated in the organization `CONTRIBUTING.md`.
+- **Name and logo**: public policy in the organization `TRADEMARKS.md`, separate from the code license.
+- **`website`**: the license field is declared in `package.json`.
+- **`vscode`**: its `LICENSE` file stays, because the Marketplace page shows it; it already points to the two standard files. GitHub reporting "other" is cosmetic.
+- **`ide`**: stays MIT, inherited from the Eclipse Theia base; relicensing it is not ours to do.
+- Still open: legal review of the above and of any commercial module terms.
 
 ## 4. Threat model as tracked controls
 

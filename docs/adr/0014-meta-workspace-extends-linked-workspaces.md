@@ -1,6 +1,6 @@
 # 0014. Meta Workspace: extend linked workspaces, do not add a second model
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-11-22
 
 ## Context

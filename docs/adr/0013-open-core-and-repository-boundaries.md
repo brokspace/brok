@@ -1,6 +1,6 @@
 # 0013. Open core and repository boundaries
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-11-22
 
 ## Context
@@ -22,4 +22,5 @@ This is technical guidance, not legal advice.
 ## Consequences
 
 - See the license audit and the repository plan in [the Phase 0 report](../hub/phase-0.md).
-- Contributor terms (DCO or CLA) need a maintainer decision before outside contributions to commercial modules.
+- Contributions are accepted under the project license with no CLA or sign-off (inbound = outbound, see the organization `CONTRIBUTING.md`). Revisit before accepting outside contributions to a private commercial module: that needs its own terms.
+- The name and logo policy is public in the organization `TRADEMARKS.md`.

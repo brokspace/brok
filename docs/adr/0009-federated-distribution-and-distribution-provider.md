@@ -1,6 +1,6 @@
 # 0009. Federated distribution behind a `DistributionProvider`
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-11-22
 
 ## Context

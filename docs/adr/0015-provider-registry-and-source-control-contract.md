@@ -1,6 +1,6 @@
 # 0015. Provider registry and a capability-based source-control contract
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-11-22
 
 ## Context
