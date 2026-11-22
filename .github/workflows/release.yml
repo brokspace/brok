@@ -10,6 +10,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
 
+# crates.io is published by publish-crates.yml, which is triggered by the same tag.
 jobs:
   create-release:
     runs-on: ubuntu-latest
@@ -29,8 +30,9 @@ jobs:
           # Built on Ubuntu 20.04, not on the runner's newest image: a binary
           # links against the glibc it is built with and needs at least that
           # version, so ubuntu-latest binaries only ran on the newest distros.
-          - { platform: linux-x86_64, os: ubuntu-latest, container: "ubuntu:20.04", max_glibc: "2.31", target: x86_64-unknown-linux-gnu }
-          - { platform: linux-aarch64, os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { platform: linux-x86_64, os: ubuntu-latest, container: "ubuntu:20.04", max_glibc: "2.31", deb_arch: amd64, deb_min_glibc: "2.31", target: x86_64-unknown-linux-gnu }
+          # The ARM runner is Ubuntu 24.04, so its binary needs glibc 2.39+; the check below enforces it.
+          - { platform: linux-aarch64, os: ubuntu-24.04-arm, max_glibc: "2.39", deb_arch: arm64, deb_min_glibc: "2.39", target: aarch64-unknown-linux-gnu }
           - { platform: macos-aarch64, os: macos-latest, target: aarch64-apple-darwin }
           # ONNX Runtime ships no prebuilt binaries for Intel Macs: text search there.
           - { platform: macos-x86_64, os: macos-latest, target: x86_64-apple-darwin, features: "--no-default-features --features ast,lancedb" }
@@ -120,12 +122,24 @@ jobs:
           if command -v sha256sum >/dev/null; then sha256sum "$asset" | cut -d' ' -f1 > "$asset.sha256";
           else shasum -a 256 "$asset" | cut -d' ' -f1 > "$asset.sha256"; fi
           echo "ASSET=$asset" >> "$GITHUB_ENV"
+      - name: Build Debian package
+        if: startsWith(matrix.platform, 'linux-')
+        working-directory: brok
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          scripts/package-deb.sh brok "$version" "${{ matrix.deb_arch }}" "$ASSET" "libc6 (>= ${{ matrix.deb_min_glibc }}), libgcc-s1"
+          echo "DEB_ASSET=brok_${version}_${{ matrix.deb_arch }}.deb" >> "$GITHUB_ENV"
       - name: Upload
         shell: bash
         working-directory: brok
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" "$ASSET" "$ASSET.sha256" --repo "$GITHUB_REPOSITORY" --clobber
+        run: |
+          assets=("$ASSET" "$ASSET.sha256")
+          # Linux jobs also upload the .deb built above.
+          if [ -n "${DEB_ASSET:-}" ]; then assets+=("$DEB_ASSET"); fi
+          gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
 
   # Assets are uploaded to a draft; publish only when every platform built,
   # so `releases/latest/download/...` (used by the installers) never breaks.
@@ -137,11 +151,3 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest
-
-  # crates.io, once the GitHub release is out.
-  crates:
-    needs: publish
-    uses: ./.github/workflows/publish-crates.yml
-    with:
-      tag: ${{ github.ref_name }}
-    secrets: inherit

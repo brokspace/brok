@@ -8,12 +8,23 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Release builds attach Debian packages (`brok_<version>_amd64.deb`, `arm64`)
+  next to the standalone binaries, and the new manual workflows publish a
+  signed APT repository and update the `brokspace/homebrew-brok` tap. See
+  `docs/publishing.md`.
 - Obsidian as an optional memory store and second brain: set
   `memory.obsidian.vault` (a local or cloud-synced vault folder) and use
   `--scope obsidian` in `brok memory`, or `scope: "obsidian"` in the MCP
   tools. Notes live in `<vault>/Brokspace/`, are searched with your code and
   are masked for secrets before they are written. A vault that does not exist
   is an error, never created. See `docs/obsidian.md`.
+
+### Changed
+
+- crates.io publishing uses Trusted Publishing (OIDC) instead of a
+  `CARGO_REGISTRY_TOKEN` secret, and starts on the release tag but waits for
+  the GitHub release to be published.
+- The Linux ARM64 build now checks the glibc floor (2.39) like x86_64 does.
 
 ## [0.4.1] - 2026-11-14
 
