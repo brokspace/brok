@@ -49,7 +49,6 @@ def formula(class_name: str, formula_name: str, binary: str, description: str,
     return f'''class {class_name} < Formula
   desc "{description}"
   homepage "https://brokspace.org"
-  version "{version}"
   license any_of: ["MIT", "Apache-2.0"]
 
 {platform_blocks}
