@@ -8,11 +8,13 @@ import re
 import urllib.request
 from pathlib import Path
 
+# (os block, cpu block, asset suffix): one `on_macos` and one `on_linux`,
+# as `brew style` requires.
 PLATFORMS = (
-    ("macos-aarch64", "on_macos do\n    on_arm do"),
-    ("macos-x86_64", "on_macos do\n    on_intel do"),
-    ("linux-aarch64", "on_linux do\n    on_arm do"),
-    ("linux-x86_64", "on_linux do\n    on_intel do"),
+    ("on_macos", "on_arm", "macos-aarch64"),
+    ("on_macos", "on_intel", "macos-x86_64"),
+    ("on_linux", "on_arm", "linux-aarch64"),
+    ("on_linux", "on_intel", "linux-x86_64"),
 )
 
 
@@ -29,16 +31,20 @@ def checksum(repo: str, tag: str, asset: str) -> str:
 def formula(class_name: str, formula_name: str, binary: str, description: str,
             repo: str, tag: str, version: str) -> str:
     blocks = []
-    for platform, condition in PLATFORMS:
-        asset = f"{binary}-{platform}"
-        sha = checksum(repo, tag, asset)
-        outer, inner = condition.split("\n    ")
-        blocks.append(
-            f"  {outer}\n    {inner}\n"
-            f"      url \"https://github.com/{repo}/releases/download/{tag}/{asset}\", using: :nounzip\n"
-            f"      sha256 \"{sha}\"\n"
-            f"    end\n  end"
-        )
+    for os_block in ("on_macos", "on_linux"):
+        cpus = []
+        for block, cpu, platform in PLATFORMS:
+            if block != os_block:
+                continue
+            asset = f"{binary}-{platform}"
+            sha = checksum(repo, tag, asset)
+            cpus.append(
+                f"    {cpu} do\n"
+                f"      url \"https://github.com/{repo}/releases/download/{tag}/{asset}\", using: :nounzip\n"
+                f"      sha256 \"{sha}\"\n"
+                f"    end"
+            )
+        blocks.append(f"  {os_block} do\n" + "\n\n".join(cpus) + "\n  end")
     platform_blocks = "\n\n".join(blocks)
     return f'''class {class_name} < Formula
   desc "{description}"
@@ -50,7 +56,7 @@ def formula(class_name: str, formula_name: str, binary: str, description: str,
 
   def install
     candidates = Dir.glob("{binary}-*").select {{ |path| File.file?(path) }}
-    odie "Expected one downloaded {binary} executable, found #{{candidates.length}}" unless candidates.length == 1
+    odie "Expected one downloaded {binary} executable, found #{{candidates.length}}" if candidates.length != 1
     bin.install candidates.first => "{binary}"
   end
 
