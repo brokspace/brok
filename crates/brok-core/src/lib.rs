@@ -13,6 +13,7 @@ pub mod links;
 pub mod memory;
 pub mod metrics;
 pub mod partition;
+pub mod provider;
 pub mod user;
 pub mod workspace;
 
