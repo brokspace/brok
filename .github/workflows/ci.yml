@@ -10,10 +10,16 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Pushes to staging/main must finish: they fill the build cache PRs restore.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
+  # CI builds are not incremental, and line tables are enough for backtraces:
+  # both make builds and the saved caches much smaller.
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
 jobs:
   test:
@@ -50,6 +56,9 @@ jobs:
           repo-token: ${{ github.token }}
       - uses: Swatinem/rust-cache@v2
         with:
+          # Only staging/main save a cache; PRs restore it. Per-PR caches of
+          # 1+ GB each used to evict the one every PR needs.
+          save-if: ${{ github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/main' }}
           workspaces: brok
           key: ${{ matrix.features }}
       - name: Format
@@ -60,7 +69,10 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.features }}" = "lean" ]; then echo "FEATURES=--no-default-features" >> "$GITHUB_ENV"; fi
+      # Lints do not depend on the OS: Ubuntu covers them, the other systems
+      # only build and run the tests (clippy would compile everything twice).
       - name: Clippy
+        if: matrix.os == 'ubuntu-latest'
         working-directory: brok
         shell: bash
         run: cargo clippy --workspace --all-targets $FEATURES -- -D warnings
@@ -88,6 +100,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.89
       - uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/main' }}
           workspaces: brok
       - working-directory: brok
         run: cargo check --workspace --no-default-features
