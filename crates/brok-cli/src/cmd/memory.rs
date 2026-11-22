@@ -50,7 +50,7 @@ pub struct AddArgs {
     /// Labels (repeat or separate with commas).
     #[arg(short, long = "tag", value_delimiter = ',')]
     tags: Vec<String>,
-    /// private (this workspace), shared (committed in .brokspace-memory/) or global (every workspace).
+    /// private (this workspace), shared (committed in .brokspace-memory/), global (every workspace) or obsidian (your Obsidian vault, see memory.obsidian).
     #[arg(short, long, default_value = "private")]
     scope: Scope,
     /// Replace the memory with this id instead of adding one.

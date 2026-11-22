@@ -8,6 +8,7 @@
 //! <root>/.brokspace/memory/<id>.md   private: this workspace, never committed
 //! <root>/.brokspace-memory/<id>.md   shared: committed, the team gets it with git
 //! <config dir>/memory/<id>.md        global: yours, in every workspace
+//! <vault>/<folder>/<id>.md           obsidian: a folder of your Obsidian vault
 //! ```
 //!
 //! Forgetting a private or global memory moves it to `.forgotten/` next to
@@ -41,6 +42,8 @@ pub enum Scope {
     Shared,
     /// Every workspace of this user.
     Global,
+    /// A folder of the user's Obsidian vault (`memory.obsidian`).
+    Obsidian,
 }
 
 impl Scope {
@@ -50,6 +53,7 @@ impl Scope {
             Self::Private => "private",
             Self::Shared => "shared",
             Self::Global => "global",
+            Self::Obsidian => "obsidian",
         }
     }
 }
@@ -62,7 +66,8 @@ impl std::str::FromStr for Scope {
             "private" => Ok(Self::Private),
             "shared" => Ok(Self::Shared),
             "global" => Ok(Self::Global),
-            other => Err(format!("unknown scope `{other}` (private, shared or global)")),
+            "obsidian" => Ok(Self::Obsidian),
+            other => Err(format!("unknown scope `{other}` (private, shared, global or obsidian)")),
         }
     }
 }
@@ -182,6 +187,8 @@ pub struct MemoryDirs {
     pub shared: PathBuf,
     /// `<config dir>/memory/`, when global memories are enabled.
     pub global: Option<PathBuf>,
+    /// `<vault>/<folder>/`, when an Obsidian vault is configured and exists.
+    pub obsidian: Option<PathBuf>,
 }
 
 impl MemoryDirs {
@@ -191,6 +198,7 @@ impl MemoryDirs {
             private: paths.memory.clone(),
             shared: paths.shared_memory.clone(),
             global: config.memory.global.then(global_dir).flatten(),
+            obsidian: obsidian_dir(paths, config),
         }
     }
 
@@ -202,6 +210,13 @@ impl MemoryDirs {
             Scope::Global => self.global.as_deref().ok_or_else(|| {
                 CoreError::Config("global memories are off (memory.global) or the config directory is unknown".into())
             }),
+            Scope::Obsidian => self.obsidian.as_deref().ok_or_else(|| {
+                CoreError::Config(
+                    "no Obsidian vault: set memory.obsidian.vault in brok.yml to an existing vault folder \
+                     (is the vault's sync folder mounted?)"
+                        .into(),
+                )
+            }),
         }
     }
 
@@ -210,6 +225,9 @@ impl MemoryDirs {
         let mut dirs = vec![(Scope::Private, self.private.as_path()), (Scope::Shared, self.shared.as_path())];
         if let Some(global) = &self.global {
             dirs.push((Scope::Global, global.as_path()));
+        }
+        if let Some(obsidian) = &self.obsidian {
+            dirs.push((Scope::Obsidian, obsidian.as_path()));
         }
         dirs
     }
@@ -287,6 +305,22 @@ impl MemoryDirs {
         }
         Ok(memory)
     }
+}
+
+/// The Obsidian folder memories go to, `<vault>/<folder>`.
+///
+/// `None` unless a vault is configured and **already exists**: brok does not
+/// create a vault, so an unmounted cloud-sync folder never makes it write
+/// memories to a lookalike path.
+pub fn obsidian_dir(paths: &WorkspacePaths, config: &BrokConfig) -> Option<PathBuf> {
+    let obsidian = &config.memory.obsidian;
+    let vault = obsidian.vault.as_deref().map(str::trim).filter(|v| !v.is_empty())?;
+    if !obsidian.folder_is_valid() {
+        return None;
+    }
+    let vault = crate::links::absolute(&paths.root, vault);
+    let folder: PathBuf = obsidian.folder.trim().split(['/', '\\']).collect();
+    vault.is_dir().then(|| vault.join(folder))
 }
 
 /// The user's global memories (`<config dir>/memory`).
@@ -453,7 +487,12 @@ mod tests {
     use super::*;
 
     fn dirs(root: &Path) -> MemoryDirs {
-        MemoryDirs { private: root.join("private"), shared: root.join("shared"), global: Some(root.join("global")) }
+        MemoryDirs {
+            private: root.join("private"),
+            shared: root.join("shared"),
+            global: Some(root.join("global")),
+            obsidian: None,
+        }
     }
 
     fn note(title: &str, body: &str) -> NewMemory {
@@ -487,6 +526,43 @@ mod tests {
         dirs.forget(&saved.id, None).unwrap();
         assert!(dirs.find(&saved.id, None).is_none());
         assert!(tmp.path().join("private").join(FORGOTTEN_DIR).join(format!("{}.md", saved.id)).is_file());
+    }
+
+    #[test]
+    fn obsidian_scope_writes_into_the_vault_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = tmp.path().join("vault");
+        std::fs::create_dir_all(vault.join(".obsidian")).unwrap();
+        // A note the user wrote by hand in Obsidian, with a wikilink.
+        std::fs::create_dir_all(vault.join("Brokspace")).unwrap();
+        std::fs::write(
+            vault.join("Brokspace").join("idea.md"),
+            "---\ntags:\n  - idea\n---\n\n# Cache plan\n\nSee [[Redis]].\n",
+        )
+        .unwrap();
+        let dirs = MemoryDirs { obsidian: Some(vault.join("Brokspace")), ..dirs(tmp.path()) };
+
+        let saved =
+            dirs.save(Scope::Obsidian, NewMemory { kind: Kind::Decision, ..note("Use Redis", "ttl 5m") }).unwrap();
+        assert_eq!(saved.scope, Scope::Obsidian);
+        assert_eq!(saved.path.parent().unwrap(), vault.join("Brokspace"));
+        assert_eq!(dirs.find("idea", None).unwrap().title, "Cache plan");
+        assert_eq!(dirs.list().len(), 2);
+
+        // Secrets never reach a vault that a cloud service may sync.
+        let leaked =
+            dirs.save(Scope::Obsidian, note("Keys", "token ghp_abcdefghijklmnopqrstuvwxyz0123456789")).unwrap();
+        assert!(!leaked.body.contains("ghp_"), "{}", leaked.body);
+
+        dirs.forget(&saved.id, Some(Scope::Obsidian)).unwrap();
+        assert!(vault.join("Brokspace").join(FORGOTTEN_DIR).join(format!("{}.md", saved.id)).is_file());
+    }
+
+    #[test]
+    fn obsidian_scope_needs_a_vault() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = dirs(tmp.path()).save(Scope::Obsidian, note("x", "y")).unwrap_err().to_string();
+        assert!(err.contains("memory.obsidian.vault"), "{err}");
     }
 
     #[test]

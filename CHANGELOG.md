@@ -12,6 +12,12 @@ adheres to [Semantic Versioning](https://semver.org/).
   next to the standalone binaries, and the new manual workflows publish a
   signed APT repository and update the `brokspace/homebrew-brok` tap. See
   `docs/publishing.md`.
+- Obsidian as an optional memory store and second brain: set
+  `memory.obsidian.vault` (a local or cloud-synced vault folder) and use
+  `--scope obsidian` in `brok memory`, or `scope: "obsidian"` in the MCP
+  tools. Notes live in `<vault>/Brokspace/`, are searched with your code and
+  are masked for secrets before they are written. A vault that does not exist
+  is an error, never created. See `docs/obsidian.md`.
 
 ### Changed
 
