@@ -30,6 +30,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- An unreadable `shards.lock`, or one written by a newer brok, is no longer
+  read as empty and overwritten: installs and removals stop with an error and
+  leave the file untouched (`brok shard list` still works). A missing lock is
+  still an empty one (#116).
 - Saving brok.yml (`brok config set`, `brok link`, editor settings) keeps
   your comments, key order and line endings, and adds new keys in their
   section. A file that cannot be merged safely is written as before.
