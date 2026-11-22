@@ -133,7 +133,7 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
 
 /// Tracks the index with Git LFS and stops ignoring it.
 fn setup_lfs(root: &Path, brokspace: &Path) -> Result<()> {
-    if !git::is_repository(root) {
+    if !brok_core::provider::default_source_control().is_repository(root) {
         bail!("{} is not a git repository", root.display());
     }
     git::lfs_track(root, ".brokspace/databases/**").context("is git-lfs installed? (https://git-lfs.com)")?;

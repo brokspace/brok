@@ -41,6 +41,14 @@ backends are cargo features, so the pure-Rust build always works.
 └── logs/<shard>.log
 ```
 
+## Source-control providers
+
+Brok talks to source control through the `SourceControl` trait in `brok-core` (`provider.rs`, [ADR 0015](adr/0015-provider-registry-and-source-control-contract.md)). Git is the built-in, default provider and wraps the same `git` calls as before, so single-repository and Git workflows behave exactly as they did. Using brok never requires configuring a provider.
+
+A provider declares a contract version and its capabilities (`status`, `history`, `submodules`, and later `diff`, `watch`, `worktrees`). Only `is_repository` and `nested_repositories` are required; any other operation on a provider that lacks the capability returns `ProviderError::Unsupported`, never an empty success. Revisions are opaque strings. Provider settings may hold credential references, never secret values.
+
+To add a provider: implement `SourceControl`, give it a unique lowercase id and `CONTRACT_VERSION`, register it with `ProviderRegistry::register` (duplicate ids and other contract versions are rejected with a message naming the cause), and test it against the same behavior the Git tests pin: repository detection, nested repositories, a repository without commits, and the `Unsupported` paths. Changing `CONTRACT_VERSION` needs a new ADR. Link management (`brok link`, which clones and fetches) and `brok setup lfs` remain Git-specific on purpose.
+
 ## Indexing pipeline
 
 1. **Walk** with the `ignore` crate (nested `.gitignore`s, global excludes),
