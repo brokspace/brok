@@ -9,6 +9,7 @@ Brokspace stays small and plugs into the tools you already use.
 | Hosted LLMs (Anthropic, DeepSeek, any OpenAI-compatible) | `llm.providers` in `brok.yml` | export the API key |
 | Git and submodules | change tracking, hot/cold partitions | automatic |
 | Team storage (S3, R2, MinIO, Git LFS) | index mirroring | `brok setup sync` |
+| Obsidian (memory and second brain, local or cloud-synced vault) | `memory.obsidian` in `brok.yml`; see [obsidian.md](obsidian.md) | `brok config set memory.obsidian.vault <path>` |
 | Anything else | write a shard | `brok shard new` |
 
 ## Coding agents

@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Obsidian as an optional memory store and second brain: set
+  `memory.obsidian.vault` (a local or cloud-synced vault folder) and use
+  `--scope obsidian` in `brok memory`, or `scope: "obsidian"` in the MCP
+  tools. Notes live in `<vault>/Brokspace/`, are searched with your code and
+  are masked for secrets before they are written. A vault that does not exist
+  is an error, never created. See `docs/obsidian.md`.
+
 ## [0.4.1] - 2026-11-14
 
 ### Fixed

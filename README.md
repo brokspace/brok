@@ -141,6 +141,7 @@ your workspaces, so `brok init` in the next project takes seconds.
 | **[Getting started](docs/getting-started.md)** | **Step by step: install, first workspace, daily use, configuration, troubleshooting** |
 | [Local LLM setup](docs/local-llm.md) | Ollama / LM Studio, which model fits your machine |
 | [Memory and linked workspaces](docs/memory.md) | What Brokspace remembers, and the workspaces yours depends on |
+| [Obsidian](docs/obsidian.md) | Use an Obsidian vault (local or cloud-synced) as memory and second brain |
 | [Integrations](docs/integrations.md) | Coding agents (MCP + skills), LLMs, storage |
 | [Troubleshooting](docs/troubleshooting.md) | Doctor, logs, metrics, common problems and reporting bugs |
 | [Skills](docs/skills.md) | Built-in workflows, writing and sharing skills |
