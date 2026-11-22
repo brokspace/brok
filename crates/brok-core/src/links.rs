@@ -139,7 +139,7 @@ impl Link {
 }
 
 /// `path` (absolute, `~/...` or relative to `root`) made absolute and tidy.
-fn absolute(root: &Path, path: &str) -> PathBuf {
+pub(crate) fn absolute(root: &Path, path: &str) -> PathBuf {
     let path = match path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
         Some(rest) => dirs::home_dir().map_or_else(|| PathBuf::from(path), |home| home.join(rest)),
         None => PathBuf::from(path),

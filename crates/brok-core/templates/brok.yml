@@ -71,6 +71,13 @@ memory:
   sessions: true
   # Search your global memories here too.
   global: true
+  # Use an Obsidian vault as one more memory store (`--scope obsidian`):
+  # memories are Markdown notes in <vault>/<folder>, read and written by
+  # Obsidian too. For a cloud vault, point at the folder your sync client
+  # (Obsidian Sync, iCloud, Dropbox, git...) keeps on this machine.
+  # obsidian:
+  #   vault: ~/Documents/Obsidian/Main
+  #   folder: Brokspace
 
 metrics:
   # Timings and counts of searches, answers, indexing and errors, kept on
