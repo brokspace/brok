@@ -1,6 +1,6 @@
 # 0012. Compatibility rules for `shard.json` and `shards.lock`
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-11-22
 
 ## Context

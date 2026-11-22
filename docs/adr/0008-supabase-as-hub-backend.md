@@ -1,6 +1,6 @@
 # 0008. Supabase as the Shard Hub backend
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-11-22
 
 ## Context

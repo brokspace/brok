@@ -1,6 +1,6 @@
 # 0011. `brok-shard-check` as a separate Rust project reusing `brok-sdk`
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-11-22
 
 ## Context
