@@ -29,6 +29,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         features: [default, lean]
+        exclude:
+          # The lean (text search only) build has no platform-specific code:
+          # Linux covers it. macOS and Windows test the default build only.
+          - { os: macos-latest, features: lean }
+          - { os: windows-latest, features: lean }
     runs-on: ${{ matrix.os }}
     steps:
       # Same layout as local polyrepo development (see scripts/bootstrap.sh):
