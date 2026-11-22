@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "brok_version": "brok 0.4.1",
+  "environment": {
+    "os": "linux",
+    "arch": "x86_64",
+    "cpus": 20,
+    "total_memory_mb": 32017
+  },
+  "fixture": {
+    "size": "large",
+    "files": 15000,
+    "bytes": 21101014,
+    "repositories": 1
+  },
+  "mode": "text",
+  "scenarios": [
+    {
+      "name": "init",
+      "status": "passed",
+      "wall_ms": 30,
+      "cpu_ms": 0,
+      "cpu_percent": 0.0,
+      "peak_rss_bytes": 9617408,
+      "io_read_bytes": 0,
+      "io_write_bytes": 12288,
+      "git_subprocesses": 0,
+      "index_bytes": 0,
+      "workspace_state_bytes": 4204
+    },
+    {
+      "name": "index-initial",
+      "status": "passed",
+      "wall_ms": 920,
+      "cpu_ms": 1320,
+      "cpu_percent": 143.3,
+      "peak_rss_bytes": 133263360,
+      "io_read_bytes": 0,
+      "io_write_bytes": 32956416,
+      "git_subprocesses": 0,
+      "index_bytes": 32940309,
+      "workspace_state_bytes": 32944658
+    },
+    {
+      "name": "index-noop",
+      "status": "passed",
+      "wall_ms": 121,
+      "cpu_ms": 120,
+      "cpu_percent": 99.2,
+      "peak_rss_bytes": 78888960,
+      "io_read_bytes": 0,
+      "io_write_bytes": 0,
+      "git_subprocesses": 0,
+      "index_bytes": 32940309,
+      "workspace_state_bytes": 32944794
+    },
+    {
+      "name": "index-incremental",
+      "status": "passed",
+      "wall_ms": 244,
+      "cpu_ms": 180,
+      "cpu_percent": 73.6,
+      "peak_rss_bytes": 131563520,
+      "io_read_bytes": 0,
+      "io_write_bytes": 32956416,
+      "git_subprocesses": 0,
+      "index_bytes": 32942726,
+      "workspace_state_bytes": 32947348
+    },
+    {
+      "name": "search",
+      "status": "passed",
+      "wall_ms": 1660,
+      "cpu_ms": 1510,
+      "cpu_percent": 91.0,
+      "peak_rss_bytes": 78917632,
+      "io_read_bytes": 0,
+      "io_write_bytes": 0,
+      "git_subprocesses": 0,
+      "extra": {
+        "p50_ms": 82.0,
+        "p95_ms": 87.0,
+        "runs": 20.0
+      }
+    },
+    {
+      "name": "idle-daemon",
+      "status": "passed",
+      "wall_ms": 15032,
+      "cpu_ms": 0,
+      "cpu_percent": 0.0,
+      "peak_rss_bytes": 78815232,
+      "io_read_bytes": 0,
+      "io_write_bytes": 0,
+      "git_subprocesses": 0,
+      "index_bytes": 32942726,
+      "workspace_state_bytes": 32949595,
+      "extra": {
+        "steady_rss_bytes": 77889536.0,
+        "window_secs": 15.0
+      }
+    },
+    {
+      "name": "multi-repo",
+      "status": "passed",
+      "wall_ms": 1228,
+      "cpu_ms": 1790,
+      "cpu_percent": 145.7,
+      "peak_rss_bytes": 166367232,
+      "io_read_bytes": 0,
+      "io_write_bytes": 46542848,
+      "git_subprocesses": 1,
+      "index_bytes": 46476682,
+      "workspace_state_bytes": 46481032,
+      "extra": {
+        "files": 21000.0,
+        "repositories": 5.0
+      }
+    },
+    {
+      "name": "multi-workspace-idle",
+      "status": "passed",
+      "wall_ms": 14971,
+      "cpu_ms": 0,
+      "cpu_percent": 0.0,
+      "peak_rss_bytes": 37212160,
+      "io_read_bytes": 0,
+      "io_write_bytes": 24576,
+      "extra": {
+        "steady_rss_bytes": 37212160.0,
+        "window_secs": 15.0,
+        "workspaces": 3.0
+      }
+    },
+    {
+      "name": "llm-answer",
+      "status": "skipped",
+      "reason": "needs a configured LLM provider; token accounting for answers and reviews is tracked in brokspace/brok-agent#23"
+    }
+  ]
+}

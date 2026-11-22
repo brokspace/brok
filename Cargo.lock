@@ -665,6 +665,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "brok-bench"
+version = "0.4.1"
+dependencies = [
+ "anyhow",
+ "clap",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tempfile",
+]
+
+[[package]]
 name = "brok-bus"
 version = "0.4.1"
 dependencies = [
