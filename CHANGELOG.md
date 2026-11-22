@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Release builds attach Debian packages (`brok_<version>_amd64.deb`, `arm64`)
+  next to the standalone binaries, and the new manual workflows publish a
+  signed APT repository and update the `brokspace/homebrew-brok` tap. See
+  `docs/publishing.md`.
+
+### Changed
+
+- crates.io publishing uses Trusted Publishing (OIDC) instead of a
+  `CARGO_REGISTRY_TOKEN` secret, and starts on the release tag but waits for
+  the GitHub release to be published.
+- The Linux ARM64 build now checks the glibc floor (2.39) like x86_64 does.
+
 ## [0.4.1] - 2026-11-14
 
 ### Fixed

@@ -1,0 +1,75 @@
+name: Update Homebrew tap
+
+# Manual by design until brokspace/homebrew-brok exists and its write token is configured.
+on:
+  workflow_dispatch:
+    inputs:
+      brok_tag:
+        description: Published brok release tag (e.g. v0.4.2)
+        required: true
+        type: string
+      agent_tag:
+        description: Published brok-agent release tag (e.g. v0.2.2)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Validate tap credentials and published releases
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          BROK_TAG: ${{ inputs.brok_tag }}
+          AGENT_TAG: ${{ inputs.agent_tag }}
+        run: |
+          set -euo pipefail
+          : "${GH_TOKEN:?Configure HOMEBREW_TAP_TOKEN with write access only to brokspace/homebrew-brok}"
+          brok_state="$(gh release view "$BROK_TAG" --repo brokspace/brok --json isDraft,isPrerelease --jq '[.isDraft,.isPrerelease] | @tsv')"
+          agent_state="$(gh release view "$AGENT_TAG" --repo brokspace/brok-agent --json isDraft,isPrerelease --jq '[.isDraft,.isPrerelease] | @tsv')"
+          [ "$brok_state" = $'false\tfalse' ] || { echo "::error::brok_tag must identify a published stable release"; exit 1; }
+          [ "$agent_state" = $'false\tfalse' ] || { echo "::error::agent_tag must identify a published stable release"; exit 1; }
+          gh auth setup-git
+      - name: Generate formulas and open a tap pull request
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          BROK_TAG: ${{ inputs.brok_tag }}
+          AGENT_TAG: ${{ inputs.agent_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tap_repo="brokspace/homebrew-brok"
+          tap_dir="$RUNNER_TEMP/homebrew-brok"
+          base="$(gh api "repos/$tap_repo" --jq .default_branch)"
+          gh repo clone "$tap_repo" "$tap_dir"
+          branch="automation/formulae-$BROK_TAG-$AGENT_TAG"
+          if git -C "$tap_dir" ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            git -C "$tap_dir" fetch origin "$branch"
+            git -C "$tap_dir" switch --create "$branch" --track "origin/$branch"
+          else
+            git -C "$tap_dir" switch --create "$branch" "origin/$base"
+          fi
+          python scripts/update-homebrew-tap.py --tap "$tap_dir" --brok-tag "$BROK_TAG" --agent-tag "$AGENT_TAG"
+          git -C "$tap_dir" add Formula/brok.rb Formula/brok-agent.rb
+          if git -C "$tap_dir" diff --cached --quiet; then
+            echo "Homebrew formulas are already current."; exit 0
+          fi
+          git -C "$tap_dir" config user.name "github-actions[bot]"
+          git -C "$tap_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$tap_dir" commit -m "chore: update Brokspace formulae"
+          git -C "$tap_dir" push --set-upstream origin "$branch"
+          existing="$(gh pr list --repo "$tap_repo" --head "$branch" --state open --json url --jq '.[0].url // empty')"
+          if [ -z "$existing" ]; then
+            gh pr create --repo "$tap_repo" --base "$base" --head "$branch" \
+              --title "chore: update Homebrew formulae ($BROK_TAG, $AGENT_TAG)" \
+              --body "Updates brok and brok-agent independently. SHA-256 values are read from the corresponding GitHub Release sidecars."
+          else
+            echo "Updated existing pull request: $existing"
+          fi

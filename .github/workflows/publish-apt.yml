@@ -1,0 +1,116 @@
+name: Publish APT repository
+
+# Manual by design: run only after both independent Rust releases contain .deb assets.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brokspace-apt-publication
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+      APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+      APT_GPG_KEY_ID: ${{ vars.APT_GPG_KEY_ID }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install repository tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends apt-utils dpkg-dev gnupg
+      - name: Download latest stable .deb assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          packages="$RUNNER_TEMP/apt-packages"
+          mkdir -p "$packages"
+          download_latest_debs() {
+            local repo="$1" tag count
+            tag="$(gh release list --repo "$repo" --limit 100 --json tagName,isDraft,isPrerelease \
+              --jq '[.[] | select(.isDraft == false and .isPrerelease == false) | .tagName][0] // empty')"
+            if [ -z "$tag" ]; then
+              echo "::error::No published stable release found for $repo"; return 1
+            fi
+            echo "$repo latest stable release: $tag"
+            count="$(gh release view "$tag" --repo "$repo" --json assets \
+              --jq '[.assets[].name | select(endswith(".deb"))] | length')"
+            if [ "$count" -eq 0 ]; then
+              echo "::error::$repo $tag has no .deb release assets; merge the packaging change and publish a new release"; return 1
+            fi
+            gh release download "$tag" --repo "$repo" --pattern '*.deb' --dir "$packages"
+          }
+          download_latest_debs brokspace/brok
+          download_latest_debs brokspace/brok-agent
+          shopt -s nullglob
+          files=("$packages"/*.deb)
+          [ "${#files[@]}" -gt 0 ] || { echo "::error::No .deb files downloaded"; exit 1; }
+          for file in "${files[@]}"; do dpkg-deb --info "$file" >/dev/null; done
+      - name: Generate and sign APT metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${APT_GPG_PRIVATE_KEY:?Configure APT_GPG_PRIVATE_KEY repository secret}"
+          : "${APT_GPG_KEY_ID:?Configure APT_GPG_KEY_ID repository variable}"
+          public="$GITHUB_WORKSPACE/public"
+          mkdir -p "$public/pool/main" \
+            "$public/dists/stable/main/binary-amd64" \
+            "$public/dists/stable/main/binary-arm64"
+          cp "$RUNNER_TEMP"/apt-packages/*.deb "$public/pool/main/"
+          printf '%s\n' "apt.brokspace.org" > "$public/CNAME"
+          printf '%s\n' 'Brokspace APT archive' > "$public/index.html"
+
+          for arch in amd64 arm64; do
+            (cd "$public" && dpkg-scanpackages --arch "$arch" --multiversion pool/main /dev/null) \
+              > "$public/dists/stable/main/binary-$arch/Packages"
+            gzip -n -9c "$public/dists/stable/main/binary-$arch/Packages" \
+              > "$public/dists/stable/main/binary-$arch/Packages.gz"
+          done
+
+          (
+            cd "$public"
+            apt-ftparchive \
+              -o APT::FTPArchive::Release::Origin="Brokspace" \
+              -o APT::FTPArchive::Release::Label="Brokspace" \
+              -o APT::FTPArchive::Release::Suite="stable" \
+              -o APT::FTPArchive::Release::Codename="stable" \
+              -o APT::FTPArchive::Release::Architectures="amd64 arm64" \
+              -o APT::FTPArchive::Release::Components="main" \
+              -o APT::FTPArchive::Release::Description="Official Brokspace APT repository" \
+              release dists/stable > dists/stable/Release
+          )
+
+          printf '%s' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+          gpg --batch --armor --export "$APT_GPG_KEY_ID" > "$public/brokspace-archive-keyring.asc"
+          passphrase_file="$RUNNER_TEMP/apt-gpg-passphrase"
+          printf '%s' "${APT_GPG_PASSPHRASE:-}" > "$passphrase_file"
+          chmod 600 "$passphrase_file"
+          gpg_args=(--batch --yes --pinentry-mode loopback --passphrase-file "$passphrase_file" --local-user "$APT_GPG_KEY_ID")
+          gpg "${gpg_args[@]}" --output "$public/dists/stable/InRelease" --clearsign "$public/dists/stable/Release"
+          gpg "${gpg_args[@]}" --output "$public/dists/stable/Release.gpg" --detach-sign "$public/dists/stable/Release"
+          gpg --batch --list-secret-keys "$APT_GPG_KEY_ID" >/dev/null
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy signed APT repository to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
