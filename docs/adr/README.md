@@ -12,3 +12,9 @@ One file per decision, numbered, in the format described in [0000](0000-record-a
 | [0005](0005-agent-skills-format-for-skills.md) | Agent Skills (SKILL.md) as the skill format | Accepted |
 | [0006](0006-mcp-stdio-server-for-coding-agents.md) | MCP stdio server for coding agents | Accepted |
 | [0007](0007-lancedb-remote-feature-workaround.md) | LanceDB `remote` feature workaround | Accepted (temporary) |
+| [0008](0008-supabase-as-hub-backend.md) | Supabase as the Shard Hub backend | Proposed |
+| [0009](0009-federated-distribution-and-distribution-provider.md) | Federated distribution behind a `DistributionProvider` | Proposed |
+| [0010](0010-trust-model-and-attestations.md) | Trust model: independent signals and verifiable evidence | Proposed |
+| [0011](0011-brok-shard-check-as-a-separate-rust-project.md) | `brok-shard-check` as a separate Rust project | Proposed |
+| [0012](0012-shard-manifest-and-lockfile-compatibility.md) | Compatibility rules for `shard.json` and `shards.lock` | Proposed |
+| [0013](0013-open-core-and-repository-boundaries.md) | Open core and repository boundaries | Proposed |
