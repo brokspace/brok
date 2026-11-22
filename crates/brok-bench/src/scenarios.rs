@@ -41,6 +41,8 @@ pub struct Options {
     pub idle_secs: u64,
     /// Let `brok init` install the default `brok-agent` shard (network).
     pub with_agent: bool,
+    /// `brok.yml` keys to set after `init` (`brok config set key value`).
+    pub config: Vec<(String, String)>,
     /// Run only these scenarios (empty: all).
     pub only: Vec<String>,
     /// Shared model cache.
@@ -66,8 +68,16 @@ impl Ctx<'_> {
             args.push("--no-agent");
         }
         self.run_ok(ws, &args)?;
+        self.configure(ws)
+    }
+
+    /// Settings applied after `init`: the mode, then the user's `--set`s.
+    fn configure(&self, ws: &Path) -> Result<()> {
         if !self.opts.semantic {
             self.run_ok(ws, &["config", "set", "embeddings.enabled", "false"])?;
+        }
+        for (key, value) in &self.opts.config {
+            self.run_ok(ws, &["config", "set", key, value])?;
         }
         Ok(())
     }
@@ -138,8 +148,8 @@ pub fn run(opts: &Options) -> Result<Report> {
         }
         let s = one_shot(&ctx, "init", &ws, &args)?;
         init_ok = s.status == Status::Passed;
-        if !opts.semantic && init_ok {
-            ctx.run_ok(&ws, &["config", "set", "embeddings.enabled", "false"])?;
+        if init_ok {
+            ctx.configure(&ws)?;
         }
         if opts.semantic && init_ok {
             // Not measured: a network download, and shared between runs.

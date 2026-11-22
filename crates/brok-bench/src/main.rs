@@ -58,6 +58,10 @@ enum Command {
         /// Embedding model cache to use (default: a temporary one).
         #[arg(long)]
         models_dir: Option<PathBuf>,
+        /// Set a `brok.yml` key after `init`, as `brok config set` does
+        /// (repeatable), for example `--set shards.brok-agent.settings.watch=polling`.
+        #[arg(long = "set", value_name = "KEY=VALUE")]
+        config: Vec<String>,
     },
     /// Compare a report with a baseline; exit 1 on a regression.
     Compare {
@@ -110,7 +114,7 @@ fn run() -> Result<ExitCode> {
             println!("{} files, {} bytes, {} repositories in {}", f.files, f.bytes, f.repositories, dir.display());
             Ok(ExitCode::SUCCESS)
         }
-        Command::Run { brok, size, out, semantic, idle_secs, with_agent, only, models_dir } => {
+        Command::Run { brok, size, out, semantic, idle_secs, with_agent, only, models_dir, config } => {
             for name in &only {
                 if !scenarios::ALL.contains(&name.as_str()) {
                     bail!("unknown scenario `{name}` (see `brok-bench list`)");
@@ -119,6 +123,15 @@ fn run() -> Result<ExitCode> {
             if idle_secs == 0 {
                 bail!("--idle-secs must be at least 1");
             }
+            let config = config
+                .iter()
+                .map(|pair| {
+                    pair.split_once('=')
+                        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                        .filter(|(k, _)| !k.is_empty())
+                        .with_context(|| format!("--set expects KEY=VALUE, got `{pair}`"))
+                })
+                .collect::<Result<Vec<_>>>()?;
             let own_models = tempfile::tempdir().context("temporary model cache")?;
             let options = scenarios::Options {
                 brok,
@@ -126,6 +139,7 @@ fn run() -> Result<ExitCode> {
                 semantic,
                 idle_secs,
                 with_agent,
+                config,
                 only,
                 models_dir: models_dir.unwrap_or_else(|| own_models.path().to_path_buf()),
             };

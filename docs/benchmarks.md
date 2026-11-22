@@ -36,7 +36,11 @@ workspace** in a temporary directory, with its own user configuration (your
 The default mode is **text only** (`embeddings.enabled: false`): it is
 offline and reproducible. `--semantic` also downloads the embedding model once
 (reuse it with `--models-dir`). `--with-agent` installs the default
-`brok-agent` (network) so the idle scenario includes its Git polling.
+`brok-agent` (network) so the idle scenario includes its Git polling; a
+`brok-agent` binary first on `PATH` is the one that gets installed, which lets
+you measure a local build. `--set key=value` (repeatable) applies a `brok.yml`
+key after `init`, for A/B runs such as
+`--set shards.brok-agent.settings.watch=polling`.
 
 ### Fixtures
 
