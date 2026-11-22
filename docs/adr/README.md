@@ -18,3 +18,5 @@ One file per decision, numbered, in the format described in [0000](0000-record-a
 | [0011](0011-brok-shard-check-as-a-separate-rust-project.md) | `brok-shard-check` as a separate Rust project | Proposed |
 | [0012](0012-shard-manifest-and-lockfile-compatibility.md) | Compatibility rules for `shard.json` and `shards.lock` | Proposed |
 | [0013](0013-open-core-and-repository-boundaries.md) | Open core and repository boundaries | Proposed |
+| [0014](0014-meta-workspace-extends-linked-workspaces.md) | Meta Workspace extends linked workspaces | Proposed |
+| [0015](0015-provider-registry-and-source-control-contract.md) | Provider registry and a capability-based source-control contract | Proposed |
