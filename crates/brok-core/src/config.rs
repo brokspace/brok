@@ -66,11 +66,18 @@ pub struct WorkspaceConfig {
     /// Other workspaces this one depends on, keyed by name: their code and
     /// memories are searched too.
     pub links: BTreeMap<String, LinkConfig>,
+    /// Meta Workspace: independent repositories coordinated by this
+    /// workspace, keyed by id. Absent for a normal workspace.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub members: BTreeMap<String, crate::members::MemberConfig>,
+    /// Typed relationships between members.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub relationships: Vec<crate::members::Relationship>,
 }
 
 impl Default for WorkspaceConfig {
     fn default() -> Self {
-        Self { submodules: true, links: BTreeMap::new() }
+        Self { submodules: true, links: BTreeMap::new(), members: BTreeMap::new(), relationships: Vec::new() }
     }
 }
 
@@ -526,6 +533,7 @@ impl BrokConfig {
                 _ => {}
             }
         }
+        errors.extend(crate::members::validate(&self.workspace.members, &self.workspace.relationships));
         if let Some(vault) = &self.memory.obsidian.vault {
             if vault.trim().is_empty() {
                 errors.push("memory.obsidian.vault must not be empty (remove it to turn the vault off)".into());
@@ -1153,6 +1161,37 @@ mod tests {
         assert!(err.to_string().contains("is required"), "{err}");
         let err = BrokConfig::from_yaml("workspace:\n  links:\n    ../x:\n      path: a\n").unwrap_err();
         assert!(err.to_string().contains("valid name"), "{err}");
+    }
+
+    #[test]
+    fn members_are_opt_in_and_round_trip() {
+        // A normal workspace never gains a members section.
+        let config = BrokConfig::from_yaml(DEFAULT_TEMPLATE).unwrap();
+        assert!(config.workspace.members.is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brok.yml");
+        std::fs::write(&path, DEFAULT_TEMPLATE).unwrap();
+        config.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("members") && !text.contains("relationships"), "{text}");
+
+        let yaml = "workspace:\n  members:\n    api:\n      path: ../api\n    web:\n      path: ../web\n  relationships:\n    - from: web\n      kind: consumes_api\n      to: api\n";
+        let mut config = BrokConfig::from_yaml(yaml).unwrap();
+        assert_eq!(config.workspace.members.len(), 2);
+        assert_eq!(config.workspace.relationships.len(), 1);
+        config
+            .workspace
+            .members
+            .insert("db".into(), crate::members::MemberConfig { path: "../db".into(), ..Default::default() });
+        config.save(&path).unwrap();
+        assert_eq!(BrokConfig::load(&path).unwrap(), config);
+
+        let err = BrokConfig::from_yaml("workspace:\n  members:\n    Bad_Id:\n      path: x\n").unwrap_err();
+        assert!(err.to_string().contains("not a valid id"), "{err}");
+        let err =
+            BrokConfig::from_yaml("workspace:\n  relationships:\n    - {from: a, kind: tests, to: b}\n").unwrap_err();
+        assert!(err.to_string().contains("is not a member"), "{err}");
+        assert!(BrokConfig::from_yaml("workspace:\n  members:\n    a:\n      path: x\n      git: y\n").is_err());
     }
 
     #[test]
