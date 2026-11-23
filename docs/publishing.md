@@ -30,6 +30,8 @@ Both crate workflows start on the release tag but wait (up to 90 minutes) for th
 
 For `brok-agent`, configure its crate's Trusted Publisher using owner `brokspace`, repository `brok-agent`, workflow `publish-crate.yml`, and environment `crates-io`. Create the matching environment in that repository.
 
+Until a crate has a Trusted Publisher, the workflows fall back to the `CARGO_REGISTRY_TOKEN` Actions secret (repository, `crates-io` environment or organization level). Trusted Publishing is tried first, so adding the publisher later needs no workflow change; the token can then be deleted. Without either, the run fails at the authentication step with `No Trusted Publishing config found`.
+
 A crate must already exist before its Trusted Publisher can be configured. If a crate has never been published, publish its first version once from a secure maintainer machine with a tightly scoped token, revoke that token immediately, and then configure OIDC for future versions. Do not put tokens in Git, workflow YAML or repository docs.
 
 Official guidance: https://crates.io/docs/trusted-publishing
