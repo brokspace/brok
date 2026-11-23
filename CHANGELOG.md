@@ -13,6 +13,9 @@ adheres to [Semantic Versioning](https://semver.org/).
   typed relationships between them (`workspace.members` and
   `workspace.relationships` in `brok.yml`). Opt-in: workspaces without members
   are unchanged. See `docs/meta-workspace.md` (brokspace/brok#108).
+- `brok search --scope repository|workspace`: `workspace` also searches the
+  members that have their own Brokspace, read-only, and names the member of
+  each hit (`member` in `--json`). The default is unchanged.
 
 ## [0.5.0] - 2026-11-23
 

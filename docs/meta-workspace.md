@@ -2,7 +2,7 @@
 
 A Meta Workspace coordinates several **independent repositories** as one engineering environment: a frontend, the APIs it calls, the shared library. It is not a monorepo and not a Git superproject. Each repository keeps its own history, configuration and index; Brokspace never writes inside one.
 
-It is **opt-in**. A workspace with no members works exactly as before, and `brok.yml` gains nothing until you add one. Design: [ADR 0014](adr/0014-meta-workspace-extends-linked-workspaces.md). This page describes what exists today; scoped search across members and workspace-wide workflows are planned (brokspace/brok#108).
+It is **opt-in**. A workspace with no members works exactly as before, and `brok.yml` gains nothing until you add one. Design: [ADR 0014](adr/0014-meta-workspace-extends-linked-workspaces.md). This page describes what exists today; workspace-wide workflows beyond search are planned (brokspace/brok#108).
 
 ```sh
 brok init                                  # in the directory that coordinates the repositories
@@ -52,8 +52,19 @@ workspace:
 
 ## Relationship to linked workspaces
 
-[Linked workspaces](memory.md#linked-workspaces) (`brok link`) keep working unchanged: read-only extra context that does not chain. Members are the opt-in, richer model, and are not searched yet; use links for cross-repository search today.
+[Linked workspaces](memory.md#linked-workspaces) (`brok link`) keep working unchanged: read-only extra context that does not chain. Members are the opt-in, richer model, and are searched with `--scope workspace` (below).
 
 ## Failure behavior and security
 
 Registration edits only `brok.yml`, atomically; an interrupted run leaves the previous file. Paths are canonicalized, so two spellings of one directory are the same member. Nothing is sent anywhere, and a member's contents are not read by these commands except for `git status` and the current commit.
+
+## Scoped search
+
+```sh
+brok search "invoice total"                      # this repository only (default, unchanged)
+brok search "invoice total" --scope workspace    # this repository and every member
+```
+
+`--scope workspace` searches each member that has its own Brokspace (its own `.brokspace`, created with `brok init` there) through its existing index, read-only: a member is never indexed, written to or started by a search. Results name the member (`api:src/billing.rs`, and a `member` field in `--json`). Members without a Brokspace, or whose index cannot be read, are listed as skipped (`skipped_members` in `--json`) and the search continues.
+
+Each index scores on its own scale, so hits are ranked by their score relative to the best hit of their own index; on a tie this repository comes first. Semantic and text search follow each member's own `embeddings` setting.
