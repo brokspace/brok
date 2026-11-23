@@ -50,3 +50,51 @@ fn status_json_in_a_workspace() {
     assert!(status["shards"].is_array());
     assert!(status["root"].as_str().is_some_and(|root| !root.is_empty()));
 }
+
+fn workspace_with(dir: &Path, file: &str, body: &str) {
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(dir.join(file), body).unwrap();
+    let init =
+        brok(dir, &["init", "--yes", "--no-agent", "--skip-model", "--no-llm", "--no-integrations", "--no-index"]);
+    assert!(init.status.success(), "init failed: {}", String::from_utf8_lossy(&init.stderr));
+    let index = brok(dir, &["index"]);
+    assert!(index.status.success(), "index failed: {}", String::from_utf8_lossy(&index.stderr));
+}
+
+#[test]
+fn scoped_search_reaches_members_only_when_asked() {
+    let root = tempfile::tempdir().unwrap();
+    let (web, api) = (root.path().join("web"), root.path().join("api"));
+    workspace_with(&web, "ui.rs", "fn render_dashboard() { /* draws the dashboard widgets */ }\n");
+    workspace_with(&api, "billing.rs", "fn compute_invoice_total() { /* invoice total with taxes */ }\n");
+    let add = brok(&web, &["workspace", "add", "../api", "--json"]);
+    assert!(add.status.success(), "add failed: {}", String::from_utf8_lossy(&add.stderr));
+
+    // Default scope: this repository only, unchanged output.
+    let own = json(&brok(&web, &["search", "invoice", "total", "--json"]));
+    assert!(own["hits"].as_array().unwrap().is_empty());
+    assert!(own.get("skipped_members").is_none());
+
+    let all = json(&brok(&web, &["search", "invoice", "total", "--scope", "workspace", "--json"]));
+    let hits = all["hits"].as_array().unwrap();
+    assert_eq!(hits.len(), 1, "{all}");
+    assert_eq!(hits[0]["member"], "api");
+    assert_eq!(hits[0]["path"], "billing.rs");
+
+    let text = brok(&web, &["search", "invoice", "total", "--scope", "workspace"]);
+    assert!(String::from_utf8_lossy(&text.stdout).contains("api:billing.rs"));
+}
+
+#[test]
+fn scoped_search_names_members_it_could_not_search() {
+    let root = tempfile::tempdir().unwrap();
+    let (web, plain) = (root.path().join("web"), root.path().join("plain"));
+    workspace_with(&web, "ui.rs", "fn render_dashboard() {}\n");
+    std::fs::create_dir_all(&plain).unwrap();
+    let add = brok(&web, &["workspace", "add", "../plain", "--json"]);
+    assert!(add.status.success(), "add failed: {}", String::from_utf8_lossy(&add.stderr));
+
+    let all = json(&brok(&web, &["search", "dashboard", "--scope", "workspace", "--json"]));
+    assert!(all["hits"][0]["member"].is_null());
+    assert!(all["skipped_members"][0].as_str().unwrap().starts_with("plain:"));
+}
