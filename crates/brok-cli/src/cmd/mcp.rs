@@ -25,6 +25,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::OnceCell;
 
+use super::scope;
 use crate::daemon;
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -143,6 +144,24 @@ impl Server {
                 .await
                 .map_err(|e| format!("{e:#}"))?
         };
+        if arguments.get("scope").and_then(Value::as_str) == Some("workspace") {
+            let mut all = scope::rank(results.hits, None);
+            let (members, skipped) = scope::search_members(workspace, &query, limit).await;
+            all.extend(members);
+            let mut merged = SearchResults { hits: Vec::new(), semantic: results.semantic };
+            for found in scope::merge(all, limit) {
+                let mut hit = found.hit;
+                if let Some(member) = found.member {
+                    hit.path = format!("{member}:{}", hit.path);
+                }
+                merged.hits.push(hit);
+            }
+            let mut text = render(&query, &merged);
+            for note in skipped {
+                text.push_str(&format!("(member skipped, {note})\n"));
+            }
+            return Ok(text);
+        }
         Ok(render(&query, &results))
     }
 
@@ -286,7 +305,8 @@ fn tools() -> Value {
                 "type": "object",
                 "properties": {
                     "query": { "type": "string", "description": "Natural-language question or identifier, e.g. 'retry policy for http calls' or 'parseConfig'." },
-                    "limit": { "type": "integer", "minimum": 1, "maximum": 50, "description": "Maximum number of results (default 8)." }
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 50, "description": "Maximum number of results (default 8)." },
+                    "scope": { "type": "string", "enum": ["repository", "workspace"], "description": "`repository` (default) searches this workspace; `workspace` also searches the member repositories of a Meta Workspace (results are prefixed `member:path`)." }
                 },
                 "required": ["query"]
             }

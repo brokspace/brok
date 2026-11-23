@@ -128,3 +128,54 @@ fn a_closed_pipe_ends_quietly() {
     assert!(!stderr.contains("panicked"), "stderr: {stderr}");
     assert!(status.success(), "status {status:?}, stderr: {stderr}");
 }
+
+#[test]
+fn status_lists_members_only_in_a_meta_workspace() {
+    let root = tempfile::tempdir().unwrap();
+    let (web, api) = (root.path().join("web"), root.path().join("api"));
+    workspace_with(&web, "ui.rs", "fn render_dashboard() {}\n");
+    workspace_with(&api, "billing.rs", "fn compute_invoice_total() {}\n");
+
+    // Unchanged for a single repository.
+    assert!(json(&brok(&web, &["status", "--json"])).get("members").is_none());
+
+    assert!(brok(&web, &["workspace", "add", "../api"]).status.success());
+    let status = json(&brok(&web, &["status", "--json"]));
+    assert_eq!(status["members"][0]["id"], "api");
+    assert_eq!(status["members"][0]["state"], "directory");
+    assert_eq!(status["members"][0]["has_brokspace"], true);
+}
+
+#[test]
+fn mcp_search_reaches_members_when_the_agent_asks() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let root = tempfile::tempdir().unwrap();
+    let (web, api) = (root.path().join("web"), root.path().join("api"));
+    workspace_with(&web, "ui.rs", "fn render_dashboard() {}\n");
+    workspace_with(&api, "billing.rs", "fn compute_invoice_total() { /* invoice total */ }\n");
+    assert!(brok(&web, &["workspace", "add", "../api"]).status.success());
+
+    let call = |args: &str| -> String {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_brok"))
+            .arg("mcp")
+            .current_dir(&web)
+            .env("BROK_MODELS_DIR", web.join(".models"))
+            .env("BROK_CONFIG_DIR", web.join(".config"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let request = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"brok_search","arguments":{args}}}}}"#
+        );
+        child.stdin.take().unwrap().write_all(format!("{request}\n").as_bytes()).unwrap();
+        let out = child.wait_with_output().unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let own = call(r#"{"query":"invoice total"}"#);
+    assert!(own.contains("No results"), "{own}");
+    let all = call(r#"{"query":"invoice total","scope":"workspace"}"#);
+    assert!(all.contains("api:billing.rs"), "{all}");
+}
