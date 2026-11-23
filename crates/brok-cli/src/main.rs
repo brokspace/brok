@@ -72,6 +72,9 @@ enum Command {
     /// Workspaces this one depends on (other services, libraries): searched with it.
     #[command(subcommand)]
     Link(cmd::link::Command),
+    /// Meta Workspace: register independent repositories as members and relate them (opt-in).
+    #[command(subcommand)]
+    Workspace(cmd::workspace::Command),
     /// Local metrics: how searches, answers and indexing perform, and what failed.
     Stats(cmd::stats::Args),
     /// Report a bug: gathers diagnostics (secrets masked), lets you review them, opens a prefilled issue.
@@ -150,6 +153,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Config(command) => cmd::config::run(&cwd, command).await,
         Command::Memory(command) => cmd::memory::run(&cwd, command).await,
         Command::Link(command) => cmd::link::run(&cwd, command).await,
+        Command::Workspace(command) => cmd::workspace::run(&cwd, command).await,
         Command::Stats(args) => cmd::stats::run(&cwd, args).await,
         Command::Bug(args) => cmd::bug::run(&cwd, args).await,
         Command::Doctor(args) => cmd::doctor::run(&cwd, args).await,
@@ -190,6 +194,7 @@ fn command_name(command: &Command) -> &'static str {
         Command::Config(_) => "config",
         Command::Memory(_) => "memory",
         Command::Link(_) => "link",
+        Command::Workspace(_) => "workspace",
         Command::Stats(_) => "stats",
         Command::Bug(_) => "bug",
         Command::Doctor(_) => "doctor",

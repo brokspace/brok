@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Meta Workspace foundation: `brok workspace add|list|status|remove|relate|unrelate|discover`
+  registers independent repositories as members of a workspace and records
+  typed relationships between them (`workspace.members` and
+  `workspace.relationships` in `brok.yml`). Opt-in: workspaces without members
+  are unchanged. See `docs/meta-workspace.md` (brokspace/brok#108).
+
 ## [0.5.0] - 2026-11-23
 
 ### Added
