@@ -13,6 +13,7 @@ crates/
   brok-index/   chunking (tree-sitter), Arrow schema, BM25, stores, embeddings, hybrid search
   brok-shard/   shard registry, installer, sandbox environment, supervisor
   brok-cli/     the `brok` binary, one module per subcommand (src/cmd/)
+  brok-bench/   developer tool (not published): reproducible resource benchmarks, see docs/benchmarks.md
 skills/         built-in Agent Skills (SKILL.md), embedded in the binary
   engineering/  daily code work
   productivity/ daily non-code workflow
@@ -38,6 +39,8 @@ cargo fmt --all
 No native toolchain? Use the dev container: `docker build -t brok-dev .devcontainer` then run cargo inside it with this repository and its siblings mounted (see [CONTRIBUTING.md](CONTRIBUTING.md)). LanceDB needs about 6 GB of RAM to compile; use `-j 4` on small machines.
 
 Before calling work done, run fmt, clippy (`-D warnings`) and tests for **both** feature sets when you touched `brok-index` or feature-gated code.
+
+Changing indexing, search, the daemon or anything that costs CPU, memory or disk? Measure it with `brok-bench` before and after, and put both numbers in the PR (see [docs/benchmarks.md](docs/benchmarks.md)).
 
 ## Conventions
 
@@ -71,7 +74,7 @@ your branch --PR, squash--> staging --release PR, merge commit--> main --> tag
    gh pr merge --auto --squash
    ```
 
-   The PR merges itself once `ubuntu-latest (default)`, `ubuntu-latest (lean)`, `macos-latest (default)`, `macos-latest (lean)`, `windows-latest (default)`, `windows-latest (lean)`, `MSRV (1.89, lean)` and `policy / title` pass and review conversations are resolved. No approval is needed.
+   The PR merges itself once `ubuntu-latest (default)`, `ubuntu-latest (lean)`, `macos-latest (default)`, `windows-latest (default)`, `MSRV (1.89, lean)` and `policy / title` pass and review conversations are resolved. No approval is needed.
 5. A check failed? Read it (`gh pr checks --watch`, `gh run view --log-failed`), fix it on the same branch and push; auto-merge stays on. Cannot fix it? Say what you tried in a PR comment and stop. Never weaken or skip a check to get green.
 
 Never push to `staging` or `main` (both reject it), force-push a branch someone else pushed to, open or merge PRs into `main`, or merge with `--admin`. The release PR into `main` is opened by the Promote workflow and merged by a maintainer.

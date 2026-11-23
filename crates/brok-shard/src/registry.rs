@@ -82,6 +82,12 @@ struct LockFile {
     shards: BTreeMap<String, LockEntry>,
 }
 
+impl LockFile {
+    fn empty() -> Self {
+        Self { version: LOCK_VERSION, shards: BTreeMap::new() }
+    }
+}
+
 /// A shard present in the registry.
 #[derive(Debug, Clone)]
 pub struct InstalledShard {
@@ -130,7 +136,12 @@ impl Registry {
     /// Every installed shard, sorted by name. Broken entries are skipped
     /// with a warning.
     pub fn list(&self) -> Result<Vec<InstalledShard>> {
-        let lock = self.read_lock();
+        // Listing only reads: an unreadable lock must not hide the shards,
+        // it just leaves them without provenance.
+        let lock = self.read_lock().unwrap_or_else(|e| {
+            tracing::warn!(error = format!("{e:#}"), "ignoring unreadable shards.lock");
+            LockFile::empty()
+        });
         let mut shards = Vec::new();
         let Ok(entries) = std::fs::read_dir(&self.dir) else { return Ok(shards) };
         for entry in entries.flatten() {
@@ -161,12 +172,12 @@ impl Registry {
         if !brok_sdk::manifest::is_valid_name(name) {
             return Ok(false);
         }
+        let mut lock = self.read_lock()?;
         let dir = self.dir.join(name);
         let existed = dir.exists();
         if existed {
             std::fs::remove_dir_all(&dir).with_context(|| format!("removing {}", dir.display()))?;
         }
-        let mut lock = self.read_lock();
         let locked = lock.shards.remove(name).is_some();
         self.write_lock(&lock)?;
         Ok(existed || locked)
@@ -174,13 +185,15 @@ impl Registry {
 
     /// Moves a fully prepared shard directory into place and records it.
     pub(crate) fn commit(&self, prepared: &Path, manifest: ShardManifest, entry: LockEntry) -> Result<InstalledShard> {
+        // Read the lock first: a lock that cannot be read or written back
+        // safely must stop the install before anything is replaced.
+        let mut lock = self.read_lock()?;
         let target = self.dir.join(&manifest.name);
         if target.exists() {
             std::fs::remove_dir_all(&target).with_context(|| format!("replacing {}", target.display()))?;
         }
         brok_core::fsutil::move_dir(prepared, &target)
             .with_context(|| format!("installing into {}", target.display()))?;
-        let mut lock = self.read_lock();
         lock.shards.insert(manifest.name.clone(), entry.clone());
         self.write_lock(&lock)?;
         Ok(InstalledShard { manifest, dir: target, lock: Some(entry) })
@@ -190,16 +203,90 @@ impl Registry {
         self.dir.join(STAGING_DIR)
     }
 
-    fn read_lock(&self) -> LockFile {
-        std::fs::read(self.dir.join(LOCK_FILE))
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or(LockFile { version: LOCK_VERSION, shards: BTreeMap::new() })
+    /// A missing lock is an empty one. A lock that cannot be parsed, or that
+    /// a newer brok wrote, is an error: writing over it would destroy the
+    /// pinned hashes it holds.
+    fn read_lock(&self) -> Result<LockFile> {
+        let path = self.dir.join(LOCK_FILE);
+        let bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(LockFile::empty()),
+            Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+        };
+        // The version alone first, so a newer format reports "upgrade", not a parse error.
+        #[derive(Deserialize)]
+        struct Header {
+            version: u32,
+        }
+        let header: Header = serde_json::from_slice(&bytes).with_context(|| {
+            format!("{} is not a valid lock file; fix or remove it (nothing was changed)", path.display())
+        })?;
+        anyhow::ensure!(
+            header.version <= LOCK_VERSION,
+            "{} has lock version {}, but this brok understands up to {LOCK_VERSION}: upgrade brok (nothing was changed)",
+            path.display(),
+            header.version
+        );
+        serde_json::from_slice(&bytes).with_context(|| {
+            format!("{} is not a valid lock file; fix or remove it (nothing was changed)", path.display())
+        })
     }
 
     fn write_lock(&self, lock: &LockFile) -> Result<()> {
         let json = serde_json::to_vec_pretty(&LockFile { version: LOCK_VERSION, shards: lock.shards.clone() })?;
         brok_core::fsutil::write_atomic(&self.dir.join(LOCK_FILE), &json)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+
+    fn registry() -> (tempfile::TempDir, Registry) {
+        let tmp = tempfile::tempdir().unwrap();
+        let registry = Registry { dir: tmp.path().to_path_buf() };
+        (tmp, registry)
+    }
+
+    fn put(registry: &Registry, content: &str) {
+        std::fs::write(registry.dir.join(LOCK_FILE), content).unwrap();
+    }
+
+    #[test]
+    fn a_missing_lock_is_empty() {
+        let (_tmp, registry) = registry();
+        assert!(registry.read_lock().unwrap().shards.is_empty());
+        assert!(!registry.remove("nothing").unwrap());
+    }
+
+    #[test]
+    fn a_damaged_lock_is_an_error_and_is_left_alone() {
+        let (_tmp, registry) = registry();
+        put(&registry, "{ not json <<<<<<< HEAD");
+        let err = format!("{:#}", registry.read_lock().unwrap_err());
+        assert!(err.contains("not a valid lock file"), "{err}");
+        assert!(registry.remove("brok-agent").is_err());
+        assert_eq!(std::fs::read_to_string(registry.dir.join(LOCK_FILE)).unwrap(), "{ not json <<<<<<< HEAD");
+        // Listing is read-only and keeps working.
+        assert!(registry.list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_newer_lock_asks_for_an_upgrade() {
+        let (_tmp, registry) = registry();
+        let newer = format!("{{\"version\": {}, \"shards\": {{}}, \"extra\": 1}}", LOCK_VERSION + 1);
+        put(&registry, &newer);
+        let err = format!("{:#}", registry.read_lock().unwrap_err());
+        assert!(err.contains("upgrade brok"), "{err}");
+        assert!(registry.remove("brok-agent").is_err());
+        assert_eq!(std::fs::read_to_string(registry.dir.join(LOCK_FILE)).unwrap(), newer);
+    }
+
+    #[test]
+    fn a_valid_lock_with_extra_fields_still_reads() {
+        let (_tmp, registry) = registry();
+        put(&registry, "{\"version\": 1, \"shards\": {}, \"future\": true}");
+        assert!(registry.read_lock().is_ok());
     }
 }

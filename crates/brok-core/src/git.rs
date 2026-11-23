@@ -10,6 +10,12 @@ use crate::error::{CoreError, Result};
 
 /// Runs `git -C <dir> <args>` and returns trimmed stdout.
 pub fn run(dir: &Path, args: &[&str]) -> Result<String> {
+    run_raw(dir, args).map(|out| out.trim_end().to_owned())
+}
+
+/// Like [`run`] but returns stdout untouched (for `-z` output, where
+/// trailing separators are data).
+pub(crate) fn run_raw(dir: &Path, args: &[&str]) -> Result<String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(dir)
@@ -22,7 +28,7 @@ pub fn run(dir: &Path, args: &[&str]) -> Result<String> {
             message: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
         });
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Whether `dir` is inside a git work tree.

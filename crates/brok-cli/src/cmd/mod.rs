@@ -22,6 +22,7 @@ pub mod skill;
 pub mod stats;
 pub mod status;
 pub mod upgrade;
+pub mod workspace;
 
 use std::path::Path;
 use std::sync::Arc;

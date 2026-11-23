@@ -66,11 +66,18 @@ pub struct WorkspaceConfig {
     /// Other workspaces this one depends on, keyed by name: their code and
     /// memories are searched too.
     pub links: BTreeMap<String, LinkConfig>,
+    /// Meta Workspace: independent repositories coordinated by this
+    /// workspace, keyed by id. Absent for a normal workspace.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub members: BTreeMap<String, crate::members::MemberConfig>,
+    /// Typed relationships between members.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub relationships: Vec<crate::members::Relationship>,
 }
 
 impl Default for WorkspaceConfig {
     fn default() -> Self {
-        Self { submodules: true, links: BTreeMap::new() }
+        Self { submodules: true, links: BTreeMap::new(), members: BTreeMap::new(), relationships: Vec::new() }
     }
 }
 
@@ -145,11 +152,47 @@ pub struct MemoryConfig {
     pub sessions: bool,
     /// Include the user's global memories, shared by every workspace.
     pub global: bool,
+    /// An Obsidian vault used as one more memory store (the `obsidian` scope).
+    pub obsidian: ObsidianConfig,
 }
 
 impl Default for MemoryConfig {
     fn default() -> Self {
-        Self { enabled: true, sessions: true, global: true }
+        Self { enabled: true, sessions: true, global: true, obsidian: ObsidianConfig::default() }
+    }
+}
+
+/// `memory.obsidian:` section: an Obsidian vault as a memory store.
+///
+/// A vault is a plain folder, so a local vault and a vault synced by Obsidian
+/// Sync, iCloud, Dropbox, OneDrive, Syncthing or git are all configured the
+/// same way: with the folder the sync client keeps on this machine.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ObsidianConfig {
+    /// The vault folder (absolute, `~/...` or relative to the workspace).
+    /// Unset: no vault. It must already exist; brok never creates it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vault: Option<String>,
+    /// Folder inside the vault where brok reads and writes memories.
+    pub folder: String,
+}
+
+impl Default for ObsidianConfig {
+    fn default() -> Self {
+        Self { vault: None, folder: "Brokspace".into() }
+    }
+}
+
+impl ObsidianConfig {
+    /// Whether `folder` is a safe relative path inside the vault: no
+    /// absolute path, no `..`, no hidden folder (Obsidian ignores those).
+    pub fn folder_is_valid(&self) -> bool {
+        let folder = self.folder.trim();
+        !folder.is_empty()
+            && !folder.starts_with(['/', '\\'])
+            && !folder.contains(':')
+            && folder.split(['/', '\\']).all(|part| !part.is_empty() && !part.starts_with('.'))
     }
 }
 
@@ -488,6 +531,18 @@ impl BrokConfig {
                     errors.push(format!("workspace.links.{name}: `branch` only applies to `git` links"));
                 }
                 _ => {}
+            }
+        }
+        errors.extend(crate::members::validate(&self.workspace.members, &self.workspace.relationships));
+        if let Some(vault) = &self.memory.obsidian.vault {
+            if vault.trim().is_empty() {
+                errors.push("memory.obsidian.vault must not be empty (remove it to turn the vault off)".into());
+            }
+            if !self.memory.obsidian.folder_is_valid() {
+                errors.push(
+                    "memory.obsidian.folder must be a relative folder inside the vault (no `..`, no hidden folders)"
+                        .into(),
+                );
             }
         }
         if self.sync.backend.is_object_store() && self.sync.remote.is_none() {
@@ -1106,6 +1161,61 @@ mod tests {
         assert!(err.to_string().contains("is required"), "{err}");
         let err = BrokConfig::from_yaml("workspace:\n  links:\n    ../x:\n      path: a\n").unwrap_err();
         assert!(err.to_string().contains("valid name"), "{err}");
+    }
+
+    #[test]
+    fn members_are_opt_in_and_round_trip() {
+        // A normal workspace never gains a members section.
+        let config = BrokConfig::from_yaml(DEFAULT_TEMPLATE).unwrap();
+        assert!(config.workspace.members.is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("brok.yml");
+        std::fs::write(&path, DEFAULT_TEMPLATE).unwrap();
+        config.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("members") && !text.contains("relationships"), "{text}");
+
+        let yaml = "workspace:\n  members:\n    api:\n      path: ../api\n    web:\n      path: ../web\n  relationships:\n    - from: web\n      kind: consumes_api\n      to: api\n";
+        let mut config = BrokConfig::from_yaml(yaml).unwrap();
+        assert_eq!(config.workspace.members.len(), 2);
+        assert_eq!(config.workspace.relationships.len(), 1);
+        config
+            .workspace
+            .members
+            .insert("db".into(), crate::members::MemberConfig { path: "../db".into(), ..Default::default() });
+        config.save(&path).unwrap();
+        assert_eq!(BrokConfig::load(&path).unwrap(), config);
+
+        let err = BrokConfig::from_yaml("workspace:\n  members:\n    Bad_Id:\n      path: x\n").unwrap_err();
+        assert!(err.to_string().contains("not a valid id"), "{err}");
+        let err =
+            BrokConfig::from_yaml("workspace:\n  relationships:\n    - {from: a, kind: tests, to: b}\n").unwrap_err();
+        assert!(err.to_string().contains("is not a member"), "{err}");
+        assert!(BrokConfig::from_yaml("workspace:\n  members:\n    a:\n      path: x\n      git: y\n").is_err());
+    }
+
+    #[test]
+    fn obsidian_vault_section() {
+        let config: BrokConfig =
+            serde_yaml_ng::from_str("memory:\n  obsidian:\n    vault: ~/Vault\n    folder: Brokspace/Memory\n")
+                .unwrap();
+        assert_eq!(config.memory.obsidian.vault.as_deref(), Some("~/Vault"));
+        config.validate().unwrap();
+        // Off by default, with a sensible folder.
+        let default = BrokConfig::default();
+        assert!(default.memory.obsidian.vault.is_none());
+        assert_eq!(default.memory.obsidian.folder, "Brokspace");
+        default.validate().unwrap();
+        // The folder cannot escape the vault or hide from Obsidian.
+        for bad in ["../outside", "/etc", "C:\\x", ".hidden", "a//b", ""] {
+            let mut config = BrokConfig::default();
+            config.memory.obsidian.vault = Some("~/Vault".into());
+            config.memory.obsidian.folder = bad.into();
+            assert!(config.validate().is_err(), "folder `{bad}` should be rejected");
+        }
+        let mut empty = BrokConfig::default();
+        empty.memory.obsidian.vault = Some("  ".into());
+        assert!(empty.validate().is_err());
     }
 
     #[test]

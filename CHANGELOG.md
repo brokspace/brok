@@ -6,10 +6,47 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Meta Workspace foundation: `brok workspace add|list|status|remove|relate|unrelate|discover`
+  registers independent repositories as members of a workspace and records
+  typed relationships between them (`workspace.members` and
+  `workspace.relationships` in `brok.yml`). Opt-in: workspaces without members
+  are unchanged. See `docs/meta-workspace.md` (brokspace/brok#108).
+
+## [0.5.0] - 2026-11-23
+
+### Added
+
+- Source control sits behind a capability-based `SourceControl` contract with
+  a provider registry in `brok-core`; Git is the default adapter and behaves
+  as before (brokspace/brok#109, ADR 0015).
+- Release builds attach Debian packages (`brok_<version>_amd64.deb`, `arm64`)
+  next to the standalone binaries, and the new manual workflows publish a
+  signed APT repository and update the `brokspace/homebrew-brok` tap. See
+  `docs/publishing.md`.
+- Obsidian as an optional memory store and second brain: set
+  `memory.obsidian.vault` (a local or cloud-synced vault folder) and use
+  `--scope obsidian` in `brok memory`, or `scope: "obsidian"` in the MCP
+  tools. Notes live in `<vault>/Brokspace/`, are searched with your code and
+  are masked for secrets before they are written. A vault that does not exist
+  is an error, never created. See `docs/obsidian.md`.
+
+### Changed
+
+- crates.io publishing uses Trusted Publishing (OIDC) instead of a
+  `CARGO_REGISTRY_TOKEN` secret, and starts on the release tag but waits for
+  the GitHub release to be published.
+- The Linux ARM64 build now checks the glibc floor (2.39) like x86_64 does.
+
 ## [0.4.1] - 2026-11-14
 
 ### Fixed
 
+- An unreadable `shards.lock`, or one written by a newer brok, is no longer
+  read as empty and overwritten: installs and removals stop with an error and
+  leave the file untouched (`brok shard list` still works). A missing lock is
+  still an empty one (#116).
 - Saving brok.yml (`brok config set`, `brok link`, editor settings) keeps
   your comments, key order and line endings, and adds new keys in their
   section. A file that cannot be merged safely is written as before.

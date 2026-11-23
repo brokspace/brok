@@ -28,6 +28,7 @@ Kinds: `note` (default), `decision`, `fact`, `session` and `handoff`.
 | `private` (default) | `.brokspace/memory/` | You, in this workspace. Never committed. |
 | `shared` | `.brokspace-memory/` at the workspace root | Everyone who clones the repository: commit the folder. |
 | `global` | `memory/` in your user configuration directory | You, in every workspace (personal preferences). |
+| `obsidian` | `<vault>/Brokspace/` in your Obsidian vault (optional) | You, in Obsidian and in every workspace that points at the vault. See [obsidian.md](obsidian.md). |
 
 Pick the scope with `--scope`. The user configuration directory is
 `~/.config/brokspace` on Linux, `~/Library/Application Support/brokspace`
@@ -125,6 +126,9 @@ memory:
   enabled: true    # search memories and let tools save them
   sessions: true   # save editor chat sessions as memories
   global: true     # search your global memories in this workspace
+  obsidian:        # optional: an Obsidian vault as one more store
+    vault: ~/Documents/Obsidian/Main
+    folder: Brokspace
 search:
   link_weight: 0.8
 ```

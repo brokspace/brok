@@ -311,9 +311,10 @@ fn tools() -> Value {
                     "tags": { "type": "array", "items": { "type": "string" } },
                     "scope": {
                         "type": "string",
-                        "enum": ["private", "shared", "global"],
+                        "enum": ["private", "shared", "global", "obsidian"],
                         "description": "private (default): this workspace on this machine; shared: committed with the \
-    repository, for the team; global: every workspace of this user (personal preferences)."
+    repository, for the team; global: every workspace of this user (personal preferences); obsidian: the user's \
+    Obsidian vault (only when configured), for notes they want in their second brain."
                     },
                     "id": { "type": "string", "description": "Id of a memory to replace (from a previous save or search)." }
                 },

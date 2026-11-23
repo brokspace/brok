@@ -93,8 +93,9 @@ impl PartitionMap {
         if !include_repositories {
             return Self::new([]);
         }
-        let mut paths = crate::git::submodules(root);
-        paths.extend(crate::git::nested_repositories(root, 4));
+        let provider = crate::provider::default_source_control();
+        let mut paths = provider.submodules(root).unwrap_or_default();
+        paths.extend(provider.nested_repositories(root, 4));
         paths.sort();
         paths.dedup();
         Self::new(paths)

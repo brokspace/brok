@@ -1,0 +1,94 @@
+name: Bench
+
+# Resource benchmarks (docs/benchmarks.md). Not a required check: it runs the
+# `small` fixture in text mode and fails only on deterministic regressions (the
+# index size and the number of git processes). Time and CPU are reported, never
+# gated, because shared runners are noisy.
+
+on:
+  pull_request:
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/bench.yml"
+  push:
+    branches: [staging]
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      size:
+        description: Fixture size (small, medium or large)
+        default: small
+        type: choice
+        options: [small, medium, large]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  SIZE: ${{ inputs.size || 'small' }}
+
+jobs:
+  bench:
+    name: bench (text)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: brok
+      - uses: actions/checkout@v7
+        with:
+          repository: brokspace/brok-sdk
+          path: brok-sdk
+      - name: Use the brok-sdk checkout
+        run: |
+          mkdir -p .cargo
+          echo '[patch.crates-io]' > .cargo/config.toml
+          echo 'brok-sdk = { path = "brok-sdk" }' >> .cargo/config.toml
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/staging' }}
+          workspaces: brok
+          key: bench
+      - name: Build brok (lean, release)
+        working-directory: brok
+        run: cargo build --release -p brok-cli --no-default-features
+      - name: Run the benchmarks
+        working-directory: brok
+        run: |
+          cargo run --release -p brok-bench -- run \
+            --brok target/release/brok --size "$SIZE" --idle-secs 10 --out bench-result.json | tee "$RUNNER_TEMP/summary.md"
+          {
+            echo "## Benchmarks ($SIZE, text)"
+            echo
+            cat "$RUNNER_TEMP/summary.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Compare with the committed baseline
+        working-directory: brok
+        run: |
+          baseline="crates/brok-bench/baselines/$SIZE-text.json"
+          set +e
+          cargo run --release -p brok-bench -- compare "$baseline" bench-result.json | tee "$RUNNER_TEMP/compare.md"
+          status=${PIPESTATUS[0]}
+          {
+            echo
+            echo "### Against \`$baseline\`"
+            echo
+            cat "$RUNNER_TEMP/compare.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: bench-result-${{ env.SIZE }}
+          path: brok/bench-result.json

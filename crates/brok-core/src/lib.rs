@@ -10,9 +10,11 @@ pub mod fsutil;
 pub mod git;
 pub mod init;
 pub mod links;
+pub mod members;
 pub mod memory;
 pub mod metrics;
 pub mod partition;
+pub mod provider;
 pub mod user;
 pub mod workspace;
 
