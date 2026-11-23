@@ -30,9 +30,11 @@ jobs:
           # Built on Ubuntu 20.04, not on the runner's newest image: a binary
           # links against the glibc it is built with and needs at least that
           # version, so ubuntu-latest binaries only ran on the newest distros.
-          - { platform: linux-x86_64, os: ubuntu-latest, container: "ubuntu:20.04", max_glibc: "2.31", deb_arch: amd64, deb_min_glibc: "2.31", target: x86_64-unknown-linux-gnu }
+          - { platform: linux-x86_64, os: ubuntu-latest, container: "ubuntu:20.04", max_glibc: "2.31", deb_arch: amd64, deb_min_glibc: "2.31", deb_depends: "libgcc-s1", static_libs: true, target: x86_64-unknown-linux-gnu }
           # The ARM runner is Ubuntu 24.04, so its binary needs glibc 2.39+; the check below enforces it.
-          - { platform: linux-aarch64, os: ubuntu-24.04-arm, max_glibc: "2.39", deb_arch: arm64, deb_min_glibc: "2.39", target: aarch64-unknown-linux-gnu }
+          # It is built plainly, so it links libstdc++ and OpenSSL 3 from the system: the .deb
+          # declares them, and the standalone binary needs them (documented in docs/publishing.md).
+          - { platform: linux-aarch64, os: ubuntu-24.04-arm, max_glibc: "2.39", deb_arch: arm64, deb_min_glibc: "2.39", deb_depends: "libgcc-s1, libstdc++6, libssl3t64 | libssl3", target: aarch64-unknown-linux-gnu }
           - { platform: macos-aarch64, os: macos-latest, target: aarch64-apple-darwin }
           # ONNX Runtime ships no prebuilt binaries for Intel Macs: text search there.
           - { platform: macos-x86_64, os: macos-latest, target: x86_64-apple-darwin, features: "--no-default-features --features ast,lancedb" }
@@ -95,8 +97,9 @@ jobs:
         working-directory: brok
         shell: bash
         run: scripts/build-linux-compat.sh
-      # Fails the release if the binary needs a newer glibc than promised, or
-      # a libssl or libstdc++ the machine may not have.
+      # Fails the release if the binary needs a newer glibc than promised, and,
+      # where the build is portable (static_libs), a libssl or libstdc++ the
+      # machine may not have.
       - name: Check the binary's dependencies
         if: matrix.max_glibc
         working-directory: brok
@@ -105,7 +108,7 @@ jobs:
           bin="target/${{ matrix.target }}/release/brok"
           needed="$(readelf -d "$bin" | grep NEEDED)"
           echo "$needed"
-          if echo "$needed" | grep -E 'libssl|libcrypto|libstdc\+\+'; then
+          if [ "${{ matrix.static_libs }}" = "true" ] && echo "$needed" | grep -E 'libssl|libcrypto|libstdc\+\+'; then
             echo "::error::brok must not depend on the system libssl or libstdc++"; exit 1
           fi
           highest="$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -V | tail -1)"
@@ -128,7 +131,7 @@ jobs:
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
-          scripts/package-deb.sh brok "$version" "${{ matrix.deb_arch }}" "$ASSET" "libc6 (>= ${{ matrix.deb_min_glibc }}), libgcc-s1"
+          scripts/package-deb.sh brok "$version" "${{ matrix.deb_arch }}" "$ASSET" "libc6 (>= ${{ matrix.deb_min_glibc }}), ${{ matrix.deb_depends }}"
           echo "DEB_ASSET=brok_${version}_${{ matrix.deb_arch }}.deb" >> "$GITHUB_ENV"
       - name: Upload
         shell: bash
