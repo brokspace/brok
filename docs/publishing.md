@@ -36,7 +36,7 @@ Official guidance: https://crates.io/docs/trusted-publishing
 
 ## Homebrew tap
 
-Create a public repository named `brokspace/homebrew-brok`. Seed it with the `homebrew-brok/README.md` file from the publishing kit.
+The public repository `brokspace/homebrew-brok` exists and is seeded with the formulae of brok 0.4.1 and brok-agent 0.2.1, so `brew install brokspace/brok/brok` already works. Its `tests` workflow runs `brew style`, `brew audit` and a real install on Linux and macOS for every change.
 
 Create a fine-grained token scoped only to `brokspace/homebrew-brok`, with Contents read/write and Pull requests read/write permissions. Store it as `HOMEBREW_TAP_TOKEN` in the `brokspace/brok` Actions secrets.
 
@@ -57,9 +57,9 @@ The APT publisher runs from `.github/workflows/publish-apt.yml` and is intention
 
 One-time setup:
 
-1. Generate a dedicated signing key for the Brokspace APT archive.
-2. Add the armored private key as `APT_GPG_PRIVATE_KEY` in `brokspace/brok` Actions secrets. If protected by a passphrase, add `APT_GPG_PASSPHRASE` as a secret.
-3. Add the full signing key ID as the `APT_GPG_KEY_ID` Actions variable.
+1. Run `scripts/apt-signing-setup.sh` as a maintainer with admin rights. It generates a dedicated Ed25519 signing key in a throwaway GPG home, stores it as the `APT_GPG_PRIVATE_KEY` secret and its fingerprint as the `APT_GPG_KEY_ID` variable without printing the key, and deletes the local copy. The key has no passphrase (the secret is the protection) and expires in 3 years; refusing to run when the secret exists avoids an accidental rotation. To use a passphrase-protected key instead, create it yourself and set `APT_GPG_PRIVATE_KEY`, `APT_GPG_PASSPHRASE` and `APT_GPG_KEY_ID` by hand.
+2. (Covered by step 1.)
+3. (Covered by step 1.)
 4. Configure repository Settings → Pages to use GitHub Actions.
 5. Configure the DNS CNAME `apt` to `brokspace.github.io`, set the Pages custom domain to `apt.brokspace.org`, and enable HTTPS when available.
 
