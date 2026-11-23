@@ -6,8 +6,6 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.5.0] - 2026-11-23
-
 ### Added
 
 - Meta Workspace foundation: `brok workspace add|list|status|remove|relate|unrelate|discover`
@@ -21,6 +19,11 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Source control sits behind a capability-based `SourceControl` contract with
   a provider registry in `brok-core`; Git is the default adapter and behaves
   as before (brokspace/brok#109, ADR 0015).
+
+## [0.5.0] - 2026-11-23
+
+### Added
+
 - Release builds attach Debian packages (`brok_<version>_amd64.deb`, `arm64`)
   next to the standalone binaries, and the new manual workflows publish a
   signed APT repository and update the `brokspace/homebrew-brok` tap. See
