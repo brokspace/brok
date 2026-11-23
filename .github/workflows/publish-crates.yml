@@ -78,12 +78,15 @@ jobs:
           echo "crates=${missing[*]}" >> "$GITHUB_OUTPUT"
       - name: Authenticate with crates.io Trusted Publishing
         id: auth
+        # Trusted Publishing when the crate has a Trusted Publisher; otherwise
+        # the CARGO_REGISTRY_TOKEN secret below is used.
+        continue-on-error: true
         if: steps.pending.outputs.crates != ''
         uses: rust-lang/crates-io-auth-action@v1
       - name: Publish in dependency order
         if: steps.pending.outputs.crates != ''
         env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || secrets.CARGO_REGISTRY_TOKEN }}
           MISSING_CRATES: ${{ steps.pending.outputs.crates }}
         shell: bash
         run: |
