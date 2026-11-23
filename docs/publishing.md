@@ -49,7 +49,7 @@ brew install brokspace/brok/brok
 brew install brokspace/brok/brok-agent
 ```
 
-The formulae use upstream standalone executables, not source builds. Linux x86_64 requires glibc 2.31 or newer; Linux ARM64 requires glibc 2.39 or newer.
+The formulae use upstream standalone executables, not source builds. Linux x86_64 requires glibc 2.31 or newer; Linux ARM64 requires glibc 2.39 or newer. The Linux ARM64 binary is built plainly and uses the system libstdc++ and OpenSSL 3 (the `.deb` declares them); the x86_64 binary has neither dependency.
 
 ## APT repository
 
