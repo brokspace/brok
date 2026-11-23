@@ -98,3 +98,33 @@ fn scoped_search_names_members_it_could_not_search() {
     assert!(all["hits"][0]["member"].is_null());
     assert!(all["skipped_members"][0].as_str().unwrap().starts_with("plain:"));
 }
+
+#[cfg(unix)]
+#[test]
+fn a_closed_pipe_ends_quietly() {
+    use std::io::Read;
+    use std::process::Stdio;
+
+    let dir = tempfile::tempdir().unwrap();
+    // Far more output than a pipe buffers, so the write fails once the reader is gone.
+    let line = format!("fn item() {{ /* widget gadget {} */ }}\n", "x".repeat(200));
+    workspace_with(dir.path(), "a.rs", &line.repeat(400));
+    let mut child = Command::new(env!("CARGO_BIN_EXE_brok"))
+        .args(["search", "widget", "gadget", "--full", "-n", "50"])
+        .current_dir(dir.path())
+        .env("BROK_MODELS_DIR", dir.path().join(".models"))
+        .env("BROK_CONFIG_DIR", dir.path().join(".config"))
+        .env("NO_COLOR", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // Read a little, then close the pipe like `| head -1`.
+    let mut first = [0u8; 16];
+    child.stdout.take().unwrap().read_exact(&mut first).unwrap();
+    let mut stderr = String::new();
+    child.stderr.take().unwrap().read_to_string(&mut stderr).unwrap();
+    let status = child.wait().unwrap();
+    assert!(!stderr.contains("panicked"), "stderr: {stderr}");
+    assert!(status.success(), "status {status:?}, stderr: {stderr}");
+}
