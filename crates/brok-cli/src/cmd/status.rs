@@ -87,6 +87,20 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
         }
     }
 
+    let members = brok_core::members::Member::all(&workspace);
+    if !members.is_empty() {
+        println!();
+        ui::header("Meta Workspace members");
+        for member in &members {
+            let state = match member.state() {
+                brok_core::members::MemberState::Missing => style("missing").red().to_string(),
+                _ if member.is_workspace() => "searchable (own brokspace)".to_owned(),
+                _ => style("no brokspace of its own").dim().to_string(),
+            };
+            println!("  {:<16} {:<28} {state}", member.id, member.root.display());
+        }
+    }
+
     println!();
     ui::header("Memory");
     if config.memory.enabled {
@@ -148,7 +162,11 @@ async fn json_status(workspace: &Workspace) -> Result<Value> {
         })
         .collect();
     let memories = memory_counts(workspace);
-    Ok(json!({
+    let members: Vec<Value> = brok_core::members::Member::all(workspace)
+        .iter()
+        .map(|m| json!({ "id": m.id, "root": m.root, "state": m.state(), "has_brokspace": m.is_workspace() }))
+        .collect();
+    let mut status = json!({
         "version": env!("CARGO_PKG_VERSION"),
         "initialized": true,
         "root": workspace.root(),
@@ -173,7 +191,12 @@ async fn json_status(workspace: &Workspace) -> Result<Value> {
             "global": config.memory.global,
             "counts": { "private": memories.0, "shared": memories.1, "global": memories.2 },
         },
-    }))
+    });
+    // Present only in a Meta Workspace, so the output of every other workspace is unchanged.
+    if !members.is_empty() {
+        status["members"] = json!(members);
+    }
+    Ok(status)
 }
 
 /// Private, shared and global memories.
