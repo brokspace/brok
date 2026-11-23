@@ -104,7 +104,31 @@ enum Command {
     Bus(cmd::bus::Command),
 }
 
+/// Whether a panic message is the standard library giving up on a closed
+/// pipe (`brok search | head`).
+fn is_closed_pipe(message: &str) -> bool {
+    (message.starts_with("failed printing to stdout") || message.starts_with("failed printing to stderr"))
+        && message.contains("Broken pipe")
+}
+
+/// `println!` panics when the reader goes away, which is routine for a CLI
+/// (`| head`, `| less`, `| jq -e`). Exit quietly like `grep` and `git log`
+/// do; every other panic keeps its message.
+fn quiet_on_closed_pipe() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = info.payload();
+        let message =
+            payload.downcast_ref::<String>().map(String::as_str).or_else(|| payload.downcast_ref::<&str>().copied());
+        if message.is_some_and(is_closed_pipe) {
+            std::process::exit(0);
+        }
+        default(info);
+    }));
+}
+
 fn main() -> ExitCode {
+    quiet_on_closed_pipe();
     // Before parsing: `brok --version` exits inside `parse`.
     cmd::upgrade::remove_leftovers();
     let cli = Cli::parse();
@@ -237,5 +261,18 @@ mod tests {
     #[test]
     fn cli_definition_is_valid() {
         super::Cli::command().debug_assert();
+    }
+}
+
+#[cfg(test)]
+mod pipe_tests {
+    use super::is_closed_pipe;
+
+    #[test]
+    fn only_a_closed_pipe_is_quiet() {
+        assert!(is_closed_pipe("failed printing to stdout: Broken pipe (os error 32)"));
+        assert!(is_closed_pipe("failed printing to stderr: Broken pipe (os error 32)"));
+        assert!(!is_closed_pipe("failed printing to stdout: No space left on device (os error 28)"));
+        assert!(!is_closed_pipe("index out of bounds: the len is 1 but the index is 5"));
     }
 }

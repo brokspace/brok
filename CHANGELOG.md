@@ -17,6 +17,10 @@ adheres to [Semantic Versioning](https://semver.org/).
   members that have their own Brokspace, read-only, and names the member of
   each hit (`member` in `--json`). The default is unchanged.
 
+### Fixed
+
+- `brok search | head` and other piped commands no longer panic when the reader closes the pipe; brok exits quietly like `grep` does (brokspace/brok#115).
+
 ## [0.5.0] - 2026-11-23
 
 ### Added
