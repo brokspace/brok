@@ -179,3 +179,29 @@ fn mcp_search_reaches_members_when_the_agent_asks() {
     let all = call(r#"{"query":"invoice total","scope":"workspace"}"#);
     assert!(all.contains("api:billing.rs"), "{all}");
 }
+
+#[test]
+fn doctor_reports_the_source_control_provider_and_members() {
+    let root = tempfile::tempdir().unwrap();
+    let (web, plain) = (root.path().join("web"), root.path().join("plain"));
+    workspace_with(&web, "ui.rs", "fn render_dashboard() {}\n");
+    std::fs::create_dir_all(&plain).unwrap();
+
+    let doctor = |dir: &Path| json(&brok(dir, &["doctor", "--json"]));
+    let names = |checks: &Value, name: &str| -> Vec<String> {
+        checks
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["name"] == name)
+            .map(|c| c["detail"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let before = doctor(&web);
+    assert!(names(&before, "source control")[0].starts_with("git (contract v1"), "{before}");
+    assert!(names(&before, "member").is_empty());
+
+    assert!(brok(&web, &["workspace", "add", "../plain"]).status.success());
+    let after = doctor(&web);
+    assert!(names(&after, "member")[0].contains("no Brokspace of its own"), "{after}");
+}
