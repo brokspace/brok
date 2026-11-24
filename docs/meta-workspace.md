@@ -38,10 +38,36 @@ workspace:
       to: payment-api
 ```
 
+- A member is **either** a `path` (a directory on this machine) **or** a `git` URL (with an optional `branch`), never both.
 - A member id is lowercase kebab-case, stable, and not reused. `name` is an optional display name.
 - Relationship kinds: `depends_on`, `consumes_api`, `publishes_api`, `uses_library`, `deploys_with`, `tests`, `shares_contract_with`. Both ends must be members, an edge cannot point at itself, and duplicates are rejected.
 - Precedence, most specific first: the repository's own `brok.yml`, then this workspace's, then your user configuration, then defaults.
 - An older brok that meets `members` stops with its usual unknown-field error rather than ignoring them.
+
+## Git URL members
+
+```sh
+brok workspace add https://github.com/acme/payment-api.git            # clone, index, register
+brok workspace add git@github.com:acme/payment-api.git --branch main --id payments
+brok workspace add <url> --no-fetch                                    # register now, clone later
+brok workspace sync [id...]                                            # pull and re-index
+```
+
+```yaml
+workspace:
+  members:
+    payment-api:
+      git: https://github.com/acme/payment-api.git
+      branch: main
+```
+
+brok clones the repository shallow and read only into `.brokspace/members/<id>/src/` and keeps its index in `.brokspace/members/<id>/state/`, so `--scope workspace` searches it like any member. Your own repositories are never touched. What brok clones follows your Git configuration: use SSH keys or a credential helper for private repositories.
+
+- **No credentials in `brok.yml`.** It is committed, so a URL with a password or token (`https://user:token@host/...`) is refused, and the error never repeats it. `git@host:org/repo` and `ssh://git@host/...` are fine: `git` there is a username.
+- Registering the same URL again (however it is spelled: trailing `/`, `.git`, case) is a no-op. A different branch of the same repository needs its own id.
+- A clone is not a workspace of its own: if the repository commits a `.brokspace/`, brok ignores it and keeps its own index.
+- `brok workspace remove <id>` deletes the clone and index brok made, and nothing else.
+- Until `brok workspace sync` has run, `brok status` and `brok doctor` show the member as not cloned and a workspace search skips it with a note.
 
 ## Rules registration enforces
 

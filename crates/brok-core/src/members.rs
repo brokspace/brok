@@ -24,8 +24,18 @@ const SKIP_DIRS: &[&str] = &[".git", ".brokspace", "node_modules", "target", "di
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MemberConfig {
-    /// Directory of the repository, absolute or relative to this workspace's root.
+    /// Directory of the repository, absolute or relative to this workspace's
+    /// root. Exactly one of `path` and `git`.
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub path: String,
+    /// Git URL brok clones (shallow, read only) into
+    /// `.brokspace/members/<id>/src` and indexes into `state/`. Never put
+    /// credentials in it: use your Git credential helper or SSH keys.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git: Option<String>,
+    /// Branch of `git` (the remote's default branch when absent).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
     /// Display name (the id when absent).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -134,8 +144,22 @@ pub fn validate(members: &BTreeMap<String, MemberConfig>, relationships: &[Relat
                 "workspace.members: `{id}` is not a valid id (lowercase letters, digits and `-`, starting with a letter)"
             ));
         }
-        if member.path.trim().is_empty() {
-            errors.push(format!("workspace.members.{id}: `path` is required"));
+        match (member.path.trim().is_empty(), &member.git) {
+            (true, None) => errors.push(format!("workspace.members.{id}: `path` or `git` is required")),
+            (false, Some(_)) => errors.push(format!("workspace.members.{id}: use either `path` or `git`, not both")),
+            (_, Some(url)) => {
+                if !looks_like_git_url(url) {
+                    errors.push(format!("workspace.members.{id}.git: `{url}` is not a git URL"));
+                } else if url_has_credentials(url) {
+                    errors.push(format!(
+                        "workspace.members.{id}.git: do not put credentials in the URL (use a credential helper or SSH keys)"
+                    ));
+                }
+            }
+            _ => {}
+        }
+        if member.branch.is_some() && member.git.is_none() {
+            errors.push(format!("workspace.members.{id}: `branch` only applies to `git` members"));
         }
     }
     let mut seen = std::collections::BTreeSet::new();
@@ -160,6 +184,22 @@ pub fn validate(members: &BTreeMap<String, MemberConfig>, relationships: &[Relat
     errors
 }
 
+/// Whether `target` names a git repository rather than a directory.
+pub fn looks_like_git_url(target: &str) -> bool {
+    target.contains("://") || target.starts_with("git@") || target.ends_with(".git")
+}
+
+/// Whether a URL carries a password or token (`https://user:token@host/...`,
+/// `https://token@host/...`). `git@host:` (ssh) is a username, not a secret.
+pub fn url_has_credentials(url: &str) -> bool {
+    let Some((_, rest)) = url.split_once("://") else { return false };
+    let authority = rest.split('/').next().unwrap_or_default();
+    match authority.rsplit_once('@') {
+        Some((userinfo, _)) => userinfo.contains(':') || !matches!(userinfo, "git" | "ssh" | "hg"),
+        None => false,
+    }
+}
+
 /// Where a member stands on this machine.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -168,8 +208,10 @@ pub enum MemberState {
     Repository,
     /// The directory exists but is not a repository (a plain folder).
     Directory,
-    /// The directory does not exist (not cloned here, moved or deleted).
+    /// The directory does not exist (moved or deleted).
     Missing,
+    /// A `git` member that has not been cloned yet (`brok workspace sync`).
+    NotCloned,
 }
 
 /// A member resolved against the workspace that declares it.
@@ -188,15 +230,29 @@ pub struct Member {
 impl Member {
     /// Resolves member `id`.
     pub fn resolve(workspace_root: &Path, id: &str, config: &MemberConfig) -> Self {
-        let raw = Path::new(&config.path);
-        let joined = if raw.is_absolute() { raw.to_path_buf() } else { workspace_root.join(raw) };
-        let root = dunce_canonicalize(&joined).unwrap_or(joined);
+        let root = if config.git.is_some() {
+            Self::managed_dir(workspace_root, id).join("src")
+        } else {
+            let raw = Path::new(&config.path);
+            let joined = if raw.is_absolute() { raw.to_path_buf() } else { workspace_root.join(raw) };
+            dunce_canonicalize(&joined).unwrap_or(joined)
+        };
         Self {
             id: id.to_owned(),
             name: config.name.clone().unwrap_or_else(|| id.to_owned()),
             root,
             config: config.clone(),
         }
+    }
+
+    /// `.brokspace/members/<id>/`: the clone and index brok keeps for a `git` member.
+    pub fn managed_dir(workspace_root: &Path, id: &str) -> PathBuf {
+        workspace_root.join(crate::workspace::BROKSPACE_DIR).join("members").join(id)
+    }
+
+    /// Whether brok clones this member (a `git` source) instead of reading a directory.
+    pub fn is_git(&self) -> bool {
+        self.config.git.is_some()
     }
 
     /// Every member of `workspace`, sorted by id.
@@ -207,7 +263,7 @@ impl Member {
     /// Whether the member is a repository, a plain folder or missing.
     pub fn state(&self) -> MemberState {
         if !self.root.is_dir() {
-            MemberState::Missing
+            if self.is_git() { MemberState::NotCloned } else { MemberState::Missing }
         } else if default_source_control().is_repository(&self.root) {
             MemberState::Repository
         } else {
@@ -217,7 +273,35 @@ impl Member {
 
     /// Whether the member is itself a Brokspace workspace (has its own index).
     pub fn is_workspace(&self) -> bool {
-        self.root.join(".brokspace").join("brok.yml").is_file()
+        // A clone's own `.brokspace` (if it commits one) is not used: brok
+        // keeps the index of a `git` member itself.
+        !self.is_git() && self.root.join(".brokspace").join("brok.yml").is_file()
+    }
+
+    /// A `git` member as a [`Link`], which already knows how to clone, fetch
+    /// and open a detached workspace over a clone. `None` for a directory.
+    pub fn as_link(&self, workspace_root: &Path) -> Option<crate::links::Link> {
+        let git = self.config.git.clone()?;
+        let config =
+            crate::config::LinkConfig { git: Some(git), branch: self.config.branch.clone(), ..Default::default() };
+        Some(crate::links::Link {
+            name: self.id.clone(),
+            config,
+            kind: crate::links::LinkKind::Git,
+            root: self.root.clone(),
+            dir: Self::managed_dir(workspace_root, &self.id),
+        })
+    }
+
+    /// The workspace to search for this member, read only: its own Brokspace
+    /// (a directory that has one), or the index brok keeps for a cloned `git`
+    /// member. `None` when there is nothing to search (a plain directory, or
+    /// a `git` member not cloned yet).
+    pub fn searchable(&self, workspace: &Workspace) -> Option<Result<Workspace>> {
+        if let Some(link) = self.as_link(workspace.root()) {
+            return link.exists().then(|| link.workspace(workspace.config()));
+        }
+        self.is_workspace().then(|| Workspace::open(&self.root))
     }
 }
 
@@ -311,7 +395,66 @@ pub fn register(
     // Relative to the workspace (`../payment-api`) so a committed brok.yml works
     // on every machine laid out the same way; absolute only across drives.
     let stored = crate::links::relative_to(&root, &dir).unwrap_or_else(|| dir.to_string_lossy().replace('\\', "/"));
-    members.insert(id.clone(), MemberConfig { path: stored, name, description });
+    members.insert(id.clone(), MemberConfig { path: stored, git: None, branch: None, name, description });
+    Ok(Registration::Added { id })
+}
+
+/// The repository name at the end of a git URL (`https://host/org/api.git` and
+/// `git@host:org/api` both give `api`).
+fn repository_name(url: &str) -> String {
+    let tail = url.trim_end_matches('/').rsplit(['/', ':']).next().unwrap_or_default();
+    tail.strip_suffix(".git").unwrap_or(tail).to_owned()
+}
+
+/// The same repository however it is spelled (trailing `/` and `.git`).
+fn same_url(a: &str, b: &str) -> bool {
+    let norm = |u: &str| u.trim().trim_end_matches('/').trim_end_matches(".git").to_ascii_lowercase();
+    norm(a) == norm(b)
+}
+
+/// Registers a git repository brok clones (`brok workspace sync`) as a
+/// member. Registering the same URL again is a no-op; credentials in the URL
+/// are refused, since `brok.yml` is committed.
+pub fn register_git(
+    members: &mut BTreeMap<String, MemberConfig>,
+    url: &str,
+    branch: Option<String>,
+    id: Option<&str>,
+    name: Option<String>,
+    description: Option<String>,
+) -> Result<Registration> {
+    let fail = |message: String| CoreError::Config(message);
+    let url = url.trim();
+    if !looks_like_git_url(url) {
+        return Err(fail(format!("`{url}` is not a git URL")));
+    }
+    if url_has_credentials(url) {
+        return Err(fail(
+            "do not put credentials in the URL: brok.yml is committed. Use your Git credential helper or SSH keys"
+                .into(),
+        ));
+    }
+    for (existing_id, existing) in members.iter() {
+        if existing.git.as_deref().is_some_and(|u| same_url(u, url)) && existing.branch == branch {
+            if let Some(wanted) = id
+                && wanted != existing_id
+            {
+                return Err(fail(format!("{url} is already registered as `{existing_id}`")));
+            }
+            return Ok(Registration::Existing { id: existing_id.clone() });
+        }
+    }
+    let id = id.map_or_else(|| slug(&repository_name(url)), str::to_owned);
+    if !is_member_id(&id) {
+        return Err(fail(format!(
+            "`{id}` is not a valid member id (lowercase letters, digits and `-`, starting with a letter); pass --id"
+        )));
+    }
+    if members.contains_key(&id) {
+        return Err(fail(format!("member id `{id}` is already used by another repository; pass --id")));
+    }
+    members
+        .insert(id.clone(), MemberConfig { path: String::new(), git: Some(url.to_owned()), branch, name, description });
     Ok(Registration::Added { id })
 }
 
@@ -476,5 +619,78 @@ mod tests {
         let found = discover(&meta, tmp.path(), &members);
         let names: Vec<_> = found.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
         assert_eq!(names, ["b"]);
+    }
+
+    #[test]
+    fn registers_git_members_idempotently_without_credentials() {
+        let mut members = BTreeMap::new();
+        let added =
+            register_git(&mut members, "https://github.com/acme/Payment-API.git", None, None, None, None).unwrap();
+        assert_eq!(added, Registration::Added { id: "payment-api".into() });
+        // The same repository however it is spelled.
+        let again = register_git(&mut members, "https://github.com/acme/payment-api/", None, None, None, None).unwrap();
+        assert_eq!(again, Registration::Existing { id: "payment-api".into() });
+        assert_eq!(members.len(), 1);
+        // A branch is a different member source, so it needs its own id.
+        assert!(
+            register_git(&mut members, "git@github.com:acme/payment-api.git", Some("next".into()), None, None, None)
+                .is_err()
+        );
+        let other = register_git(
+            &mut members,
+            "git@github.com:acme/payment-api.git",
+            Some("next".into()),
+            Some("payments-next"),
+            None,
+            None,
+        );
+        assert_eq!(other.unwrap(), Registration::Added { id: "payments-next".into() });
+
+        for secret in ["https://user:hunter2@example.com/a/b.git", "https://ghp_token@example.com/a/b.git"] {
+            let err = register_git(&mut members, secret, None, None, None, None).unwrap_err().to_string();
+            assert!(err.contains("credentials"), "{err}");
+            assert!(
+                !err.contains("hunter2") && !err.contains("ghp_token"),
+                "the error must not repeat the secret: {err}"
+            );
+        }
+        assert!(register_git(&mut members, "not a url", None, None, None, None).is_err());
+        assert!(!url_has_credentials("git@github.com:acme/x.git"));
+        assert!(!url_has_credentials("ssh://git@example.com/acme/x.git"));
+        assert!(!url_has_credentials("https://example.com/acme/x.git"));
+    }
+
+    #[test]
+    fn a_member_is_a_path_or_a_git_url_not_both() {
+        let mut members = BTreeMap::new();
+        members.insert(
+            "both".into(),
+            MemberConfig { path: "../a".into(), git: Some("https://example.com/a.git".into()), ..Default::default() },
+        );
+        members.insert("neither".into(), MemberConfig::default());
+        members.insert(
+            "branchy".into(),
+            MemberConfig { path: "../b".into(), branch: Some("x".into()), ..Default::default() },
+        );
+        members.insert(
+            "secret".into(),
+            MemberConfig { git: Some("https://u:p@example.com/a.git".into()), ..Default::default() },
+        );
+        let errors = validate(&members, &[]).join("\n");
+        for expected in ["not both", "`path` or `git` is required", "`branch` only applies", "credentials"] {
+            assert!(errors.contains(expected), "{expected} missing from:\n{errors}");
+        }
+    }
+
+    #[test]
+    fn a_git_member_lives_under_the_workspace_until_cloned() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = MemberConfig { git: Some("https://example.com/acme/api.git".into()), ..Default::default() };
+        let member = Member::resolve(dir.path(), "api", &config);
+        assert!(member.is_git());
+        assert!(member.root.ends_with(std::path::Path::new(".brokspace/members/api/src")));
+        assert_eq!(member.state(), MemberState::NotCloned);
+        assert!(!member.is_workspace());
+        assert_eq!(member.as_link(dir.path()).unwrap().dir, Member::managed_dir(dir.path(), "api"));
     }
 }
