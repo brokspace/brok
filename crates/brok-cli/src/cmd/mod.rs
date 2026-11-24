@@ -14,6 +14,7 @@ pub mod mcp;
 pub mod memory;
 pub mod model;
 pub mod run;
+pub mod scope;
 pub mod search;
 pub mod service;
 pub mod setup;

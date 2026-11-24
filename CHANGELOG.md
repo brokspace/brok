@@ -16,6 +16,9 @@ adheres to [Semantic Versioning](https://semver.org/).
 - `brok search --scope repository|workspace`: `workspace` also searches the
   members that have their own Brokspace, read-only, and names the member of
   each hit (`member` in `--json`). The default is unchanged.
+- The MCP tool `brok_search` accepts `scope: "workspace"` to search member
+  repositories, and `brok status` (and `--json`, as `members`) lists them. Both
+  only appear or change when a workspace has members.
 
 ### Fixed
 

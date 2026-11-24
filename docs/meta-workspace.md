@@ -68,3 +68,11 @@ brok search "invoice total" --scope workspace    # this repository and every mem
 `--scope workspace` searches each member that has its own Brokspace (its own `.brokspace`, created with `brok init` there) through its existing index, read-only: a member is never indexed, written to or started by a search. Results name the member (`api:src/billing.rs`, and a `member` field in `--json`). Members without a Brokspace, or whose index cannot be read, are listed as skipped (`skipped_members` in `--json`) and the search continues.
 
 Each index scores on its own scale, so hits are ranked by their score relative to the best hit of their own index; on a tie this repository comes first. Semantic and text search follow each member's own `embeddings` setting.
+
+### From your coding agents
+
+The MCP tool `brok_search` takes the same choice as an optional argument: `"scope": "workspace"` searches the members too, and each result is prefixed `member:path`. Without it the tool behaves as before, so an agent only crosses repositories when it asks to.
+
+## Status
+
+`brok status` lists the members under "Meta Workspace members" (missing, with or without a Brokspace of its own), and `brok status --json` gains a `members` array with `id`, `root`, `state` and `has_brokspace`. The key is absent in a workspace without members, so the output of every other workspace is unchanged.
