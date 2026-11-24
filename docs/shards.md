@@ -162,7 +162,11 @@ async fn main() -> Result<(), ClientError> {
 - `client.reply(&request, &payload)` answers a request; only the requester
   receives it.
 - `client.context()` returns the workspace root, your `shards.<name>.settings`
-  from `brok.yml` and the `llm` routing table.
+  from `brok.yml` and the `llm` routing table,
+  and, in a Meta Workspace, `members` (id, directory and whether each has its own
+  Brokspace). Members whose directory does not exist on this machine are left out;
+  the list is empty, and absent from the frame, when the workspace has no members.
+  Needs `brok-sdk` 0.2.
 
 Shards do not have to be written in Rust: anything that can open a Unix
 socket / named pipe and exchange length-prefixed JSON frames works. The frame

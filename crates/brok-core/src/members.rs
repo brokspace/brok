@@ -293,6 +293,15 @@ impl Member {
         })
     }
 
+    /// What a shard is told about this member: `None` when its directory does
+    /// not exist on this machine (moved, deleted, or a `git` member that is not
+    /// cloned yet).
+    pub fn info(&self, workspace: &Workspace) -> Option<brok_sdk::frame::MemberInfo> {
+        self.root
+            .is_dir()
+            .then(|| brok_sdk::frame::MemberInfo::new(&self.id, &self.root, self.searchable(workspace).is_some()))
+    }
+
     /// The workspace to search for this member, read only: its own Brokspace
     /// (a directory that has one), or the index brok keeps for a cloned `git`
     /// member. `None` when there is nothing to search (a plain directory, or
@@ -496,6 +505,31 @@ mod tests {
         id: Option<&str>,
     ) -> Result<Registration> {
         register(root, members, Path::new(target), id, None, None)
+    }
+
+    #[test]
+    fn info_tells_a_shard_which_members_exist_and_have_an_index() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("ws");
+        std::fs::create_dir_all(&root).unwrap();
+        let workspace =
+            Workspace::detached(&root, &tmp.path().join("state"), crate::config::BrokConfig::default()).unwrap();
+
+        let with_index = tmp.path().join("api");
+        std::fs::create_dir_all(with_index.join(".brokspace")).unwrap();
+        std::fs::write(with_index.join(".brokspace").join("brok.yml"), "version: 1\n").unwrap();
+        std::fs::create_dir_all(tmp.path().join("plain")).unwrap();
+
+        let member = |id: &str, path: &str| {
+            Member::resolve(workspace.root(), id, &MemberConfig { path: path.to_owned(), ..Default::default() })
+        };
+        let api = member("api", "../api").info(&workspace).expect("exists");
+        assert!(api.has_brokspace && api.id == "api");
+        assert!(!member("plain", "../plain").info(&workspace).expect("exists").has_brokspace);
+        assert!(member("gone", "../gone").info(&workspace).is_none());
+
+        let git = MemberConfig { git: Some("https://example.com/a/b.git".to_owned()), ..Default::default() };
+        assert!(Member::resolve(workspace.root(), "remote", &git).info(&workspace).is_none(), "not cloned yet");
     }
 
     #[test]
