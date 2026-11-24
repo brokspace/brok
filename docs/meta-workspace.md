@@ -41,7 +41,7 @@ workspace:
 - A member is **either** a `path` (a directory on this machine) **or** a `git` URL (with an optional `branch`), never both.
 - A member id is lowercase kebab-case, stable, and not reused. `name` is an optional display name.
 - Relationship kinds: `depends_on`, `consumes_api`, `publishes_api`, `uses_library`, `deploys_with`, `tests`, `shares_contract_with`. Both ends must be members, an edge cannot point at itself, and duplicates are rejected.
-- Precedence, most specific first: the repository's own `brok.yml`, then this workspace's, then your user configuration, then defaults.
+- Configuration is **not merged across repositories**. Each workspace reads only its own `brok.yml`; a member keeps using the `brok.yml` of its own Brokspace (its model, `embeddings` and `search` settings) when it is searched, and nothing in the coordinating workspace overrides it. Your user configuration only seeds the LLM choice when `brok init` creates a workspace ([User defaults](configuration.md#user-defaults)); it is not read afterwards.
 - An older brok that meets `members` stops with its usual unknown-field error rather than ignoring them.
 
 ## Git URL members
