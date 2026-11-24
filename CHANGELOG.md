@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-23
+
 ### Added
 
 - Meta Workspace foundation: `brok workspace add|list|status|remove|relate|unrelate|discover`
