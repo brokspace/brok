@@ -24,7 +24,9 @@ pub enum Command {
     List(JsonArgs),
     /// Show each member's state: repository, changes, whether it has its own Brokspace.
     Status(JsonArgs),
-    /// Unregister a member (its directory is never touched).
+    /// Clone or pull the git members and index them.
+    Sync(SyncArgs),
+    /// Unregister a member (a directory is never touched; the clone and index of a git member are removed).
     Remove(RemoveArgs),
     /// Record that one member relates to another (`brok workspace relate web consumes_api api`).
     Relate(RelateArgs),
@@ -37,8 +39,15 @@ pub enum Command {
 /// Arguments of `brok workspace add`.
 #[derive(Debug, clap::Args)]
 pub struct AddArgs {
-    /// Directory of the repository, absolute or relative to this workspace.
-    path: PathBuf,
+    /// A directory on this machine (absolute or relative to this workspace)
+    /// or a git URL, which brok clones read only and indexes itself.
+    target: String,
+    /// Branch of a git URL (the remote's default when absent).
+    #[arg(long)]
+    branch: Option<String>,
+    /// For a git URL: only write brok.yml; clone and index later with `brok workspace sync`.
+    #[arg(long)]
+    no_fetch: bool,
     /// Member id (default: the directory name, as lowercase kebab-case).
     #[arg(long)]
     id: Option<String>,
@@ -48,6 +57,16 @@ pub struct AddArgs {
     /// What it is and how it relates to the rest (helps the LLM).
     #[arg(short, long)]
     description: Option<String>,
+    /// Print JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+/// Arguments of `brok workspace sync`.
+#[derive(Debug, clap::Args)]
+pub struct SyncArgs {
+    /// Member ids (default: every git member).
+    ids: Vec<String>,
     /// Print JSON.
     #[arg(long)]
     json: bool,
@@ -95,7 +114,8 @@ pub struct DiscoverArgs {
 pub async fn run(cwd: &Path, command: Command) -> Result<()> {
     let mut workspace = super::workspace(cwd)?;
     match command {
-        Command::Add(args) => add(&mut workspace, args),
+        Command::Add(args) => add(&mut workspace, args).await,
+        Command::Sync(args) => sync(&workspace, &args).await,
         Command::List(args) => list(&workspace, args.json),
         Command::Status(args) => status(&workspace, args.json),
         Command::Remove(args) => remove(&mut workspace, &args),
@@ -105,45 +125,127 @@ pub async fn run(cwd: &Path, command: Command) -> Result<()> {
     }
 }
 
-fn add(workspace: &mut Workspace, args: AddArgs) -> Result<()> {
+async fn add(workspace: &mut Workspace, args: AddArgs) -> Result<()> {
     let mut config = workspace.config().clone();
-    let registration = members::register(
-        workspace.root(),
-        &mut config.workspace.members,
-        &args.path,
-        args.id.as_deref(),
-        args.name.filter(|n| !n.trim().is_empty()),
-        args.description.filter(|d| !d.trim().is_empty()),
-    )?;
+    let description = args.description.filter(|d| !d.trim().is_empty());
+    let name = args.name.filter(|n| !n.trim().is_empty());
+    let is_git = members::looks_like_git_url(&args.target) && !workspace.root().join(&args.target).is_dir();
+    if args.branch.is_some() && !is_git {
+        bail!("--branch only applies to a git URL");
+    }
+    let registration = if is_git {
+        members::register_git(
+            &mut config.workspace.members,
+            &args.target,
+            args.branch,
+            args.id.as_deref(),
+            name,
+            description,
+        )?
+    } else {
+        members::register(
+            workspace.root(),
+            &mut config.workspace.members,
+            Path::new(&args.target),
+            args.id.as_deref(),
+            name,
+            description,
+        )?
+    };
     let (id, changed) = match &registration {
         Registration::Added { id } => (id.clone(), true),
         Registration::Existing { id } => (id.clone(), false),
     };
     // Only touch brok.yml when something changed, so repeating the command is a true no-op.
     if changed {
+        config.validate()?;
         workspace.save_config(config)?;
     }
+    let mut synced = None;
+    if is_git && changed && !args.no_fetch {
+        // Clone and index now, like `brok link add`; a failure leaves the registration in place.
+        let results = sync_members(workspace, std::slice::from_ref(&id), !args.json).await?;
+        synced = results.into_iter().next();
+    }
     if args.json {
-        println!("{}", json!({ "id": id, "added": changed }));
+        println!("{}", json!({ "id": id, "added": changed, "sync": synced }));
     } else if changed {
         ui::success(&format!("Registered `{id}`"));
+        if is_git && args.no_fetch {
+            ui::hint(&format!("brok workspace sync {id}   (clone and index it)"));
+        }
     } else {
         ui::step(&format!("`{id}` is already a member"));
     }
     Ok(())
 }
 
+/// Clones or pulls the `git` members (all, or the ids given) and indexes
+/// them. Directories are left alone: they have their own Brokspace or none.
+async fn sync_members(workspace: &Workspace, ids: &[String], verbose: bool) -> Result<Vec<serde_json::Value>> {
+    let all = Member::all(workspace);
+    for id in ids {
+        match all.iter().find(|m| &m.id == id) {
+            None => bail!("no member `{id}` (see `brok workspace list`)"),
+            Some(m) if !m.is_git() => {
+                bail!("`{id}` is a directory: only git members are cloned (see `brok workspace add <git-url>`)")
+            }
+            Some(_) => {}
+        }
+    }
+    let mut results = Vec::new();
+    for member in all.iter().filter(|m| m.is_git() && (ids.is_empty() || ids.contains(&m.id))) {
+        let Some(link) = member.as_link(workspace.root()) else { continue };
+        let value = match super::link::sync_one(workspace, &link, verbose).await {
+            Ok(mut value) => {
+                value["id"] = json!(member.id);
+                value
+            }
+            Err(e) => {
+                if verbose {
+                    ui::warn(&format!("{}: {e:#}", member.id));
+                }
+                json!({ "id": member.id, "error": format!("{e:#}") })
+            }
+        };
+        results.push(value);
+    }
+    Ok(results)
+}
+
+async fn sync(workspace: &Workspace, args: &SyncArgs) -> Result<()> {
+    let results = sync_members(workspace, &args.ids, !args.json).await?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&results)?);
+    } else if results.is_empty() {
+        ui::step("no git members to sync (`brok workspace add <git-url>`)");
+    }
+    if results.iter().any(|r| r.get("error").is_some()) {
+        bail!("some members could not be synced");
+    }
+    Ok(())
+}
+
 fn remove(workspace: &mut Workspace, args: &RemoveArgs) -> Result<()> {
     let mut config = workspace.config().clone();
-    if config.workspace.members.remove(&args.id).is_none() {
+    let Some(removed) = config.workspace.members.remove(&args.id) else {
         bail!("no member `{}` (see `brok workspace list`)", args.id);
-    }
+    };
     config.workspace.relationships.retain(|r| r.from != args.id && r.to != args.id);
     workspace.save_config(config)?;
+    // Only what brok made for a git member: `.brokspace/members/<id>/`. A directory member is never touched.
+    if removed.git.is_some() {
+        let dir = Member::managed_dir(workspace.root(), &args.id);
+        if dir.is_dir() {
+            std::fs::remove_dir_all(&dir).map_err(|e| anyhow::anyhow!("cannot remove {}: {e}", dir.display()))?;
+        }
+    }
     if args.json {
         println!("{}", json!({ "removed": args.id }));
     } else {
-        ui::success(&format!("Unregistered `{}` (its directory was not touched)", args.id));
+        let note =
+            if removed.git.is_some() { "its clone and index were removed" } else { "its directory was not touched" };
+        ui::success(&format!("Unregistered `{}` ({note})", args.id));
     }
     Ok(())
 }
@@ -184,7 +286,7 @@ fn list(workspace: &Workspace, json: bool) -> Result<()> {
     if json {
         let members: Vec<_> = Member::all(workspace)
             .iter()
-            .map(|m| json!({ "id": m.id, "name": m.name, "path": m.config.path, "root": m.root, "description": m.config.description }))
+            .map(|m| json!({ "id": m.id, "name": m.name, "path": m.config.path, "git": m.config.git, "branch": m.config.branch, "root": m.root, "description": m.config.description }))
             .collect();
         let relationships: Vec<_> = config
             .relationships
@@ -199,7 +301,7 @@ fn list(workspace: &Workspace, json: bool) -> Result<()> {
         return Ok(());
     }
     for member in Member::all(workspace) {
-        println!("  {:<20} {}", style(&member.id).bold(), member.config.path);
+        println!("  {:<20} {}", style(&member.id).bold(), member.config.git.as_deref().unwrap_or(&member.config.path));
         if let Some(description) = &member.config.description {
             println!("  {:<20} {}", "", style(description).dim());
         }
@@ -243,6 +345,7 @@ fn status(workspace: &Workspace, json: bool) -> Result<()> {
             MemberState::Repository => style("repository").green(),
             MemberState::Directory => style("directory").yellow(),
             MemberState::Missing => style("missing").red(),
+            MemberState::NotCloned => style("not cloned").yellow(),
         };
         let detail = match (changes, head) {
             (Some(n), Some(h)) => format!("{h}, {n} uncommitted change(s)"),

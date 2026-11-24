@@ -29,11 +29,17 @@ pub async fn search_members(workspace: &Workspace, text: &str, limit: usize) -> 
     let mut found = Vec::new();
     let mut skipped = Vec::new();
     for member in Member::all(workspace) {
-        if !member.is_workspace() {
-            skipped.push(format!("{}: no Brokspace of its own (run `brok init` there)", member.id));
-            continue;
-        }
-        let opened = Workspace::open(&member.root);
+        let opened = match member.searchable(workspace) {
+            Some(opened) => opened,
+            None => {
+                skipped.push(if member.is_git() {
+                    format!("{}: not cloned yet (run `brok workspace sync {}`)", member.id, member.id)
+                } else {
+                    format!("{}: no Brokspace of its own (run `brok init` there)", member.id)
+                });
+                continue;
+            }
+        };
         let results = match opened {
             Ok(ws) => match Index::open(&ws, super::embedder_for_search(&ws), Access::ReadOnly).await {
                 Ok(index) => index.search(&SearchQuery { text: text.to_owned(), limit, focus: None }).await,

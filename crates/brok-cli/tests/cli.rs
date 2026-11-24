@@ -205,3 +205,85 @@ fn doctor_reports_the_source_control_provider_and_members() {
     let after = doctor(&web);
     assert!(names(&after, "member")[0].contains("no Brokspace of its own"), "{after}");
 }
+
+fn git_repo_with(dir: &Path, file: &str, body: &str) {
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(dir.join(file), body).unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    };
+    git(&["init", "-q"]);
+    git(&["add", "."]);
+    git(&["commit", "-q", "-m", "init"]);
+}
+
+#[test]
+fn a_git_url_member_is_cloned_indexed_searched_and_removed() {
+    let root = tempfile::tempdir().unwrap();
+    let (web, remote) = (root.path().join("web"), root.path().join("remote-api"));
+    workspace_with(&web, "ui.rs", "fn render_dashboard() {}\n");
+    git_repo_with(&remote, "billing.rs", "fn compute_invoice_total() { /* invoice total */ }\n");
+    let url = format!("file://{}", remote.display());
+
+    let added = json(&brok(&web, &["workspace", "add", &url, "--id", "api", "--json"]));
+    assert_eq!(added["added"], true);
+    assert!(added["sync"]["error"].is_null(), "{added}");
+    assert!(web.join(".brokspace/members/api/src/billing.rs").is_file());
+    // The URL is what brok.yml records, never a path to the clone.
+    let yml = std::fs::read_to_string(web.join(".brokspace/brok.yml")).unwrap();
+    assert!(yml.contains("git:") && yml.contains("remote-api"), "{yml}");
+
+    let all = json(&brok(&web, &["search", "invoice", "total", "--scope", "workspace", "--json"]));
+    assert_eq!(all["hits"][0]["member"], "api", "{all}");
+    assert_eq!(all["hits"][0]["path"], "billing.rs");
+    // Not searched unless asked.
+    assert!(json(&brok(&web, &["search", "invoice", "total", "--json"]))["hits"].as_array().unwrap().is_empty());
+
+    // Registering again changes nothing; a sync pulls and indexes again.
+    assert_eq!(json(&brok(&web, &["workspace", "add", &url, "--json"]))["added"], false);
+    let synced = json(&brok(&web, &["workspace", "sync", "--json"]));
+    assert_eq!(synced[0]["id"], "api");
+    assert!(synced[0]["error"].is_null(), "{synced}");
+
+    let status = json(&brok(&web, &["status", "--json"]));
+    assert_eq!(status["members"][0]["state"], "repository");
+    assert!(status["members"][0]["git"].as_str().unwrap().ends_with("remote-api"));
+
+    // Removing deletes what brok made, and nothing else.
+    assert!(brok(&web, &["workspace", "remove", "api"]).status.success());
+    assert!(!web.join(".brokspace/members/api").exists());
+    assert!(remote.join("billing.rs").is_file());
+}
+
+#[test]
+fn a_git_member_with_credentials_or_a_bad_branch_is_refused_without_writing() {
+    let root = tempfile::tempdir().unwrap();
+    let web = root.path().join("web");
+    workspace_with(&web, "ui.rs", "fn render_dashboard() {}\n");
+    let before = std::fs::read_to_string(web.join(".brokspace/brok.yml")).unwrap();
+
+    let out = brok(&web, &["workspace", "add", "https://user:hunter2@example.com/acme/api.git"]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("credentials") && !stderr.contains("hunter2"), "{stderr}");
+
+    // --no-fetch registers without the network; --branch needs a URL.
+    assert!(!brok(&web, &["workspace", "add", "../nowhere", "--branch", "x"]).status.success());
+    assert_eq!(std::fs::read_to_string(web.join(".brokspace/brok.yml")).unwrap(), before);
+
+    let lazy = json(&brok(&web, &["workspace", "add", "https://example.com/acme/api.git", "--no-fetch", "--json"]));
+    assert_eq!(lazy["added"], true);
+    let status = json(&brok(&web, &["workspace", "status", "--json"]));
+    assert_eq!(status[0]["state"], "not_cloned");
+    let search = json(&brok(&web, &["search", "dashboard", "--scope", "workspace", "--json"]));
+    assert!(search["skipped_members"][0].as_str().unwrap().contains("not cloned yet"), "{search}");
+}

@@ -272,6 +272,15 @@ async fn check_workspace(workspace: &Workspace, report: &mut Report) {
                 &format!("{}: {} does not exist on this machine", member.id, member.root.display()),
                 Some(&format!("brok workspace remove {}   (or restore the directory)", member.id)),
             ),
+            brok_core::members::MemberState::NotCloned => report.line(
+                Status::Warn,
+                "member",
+                &format!("{}: not cloned yet, so `--scope workspace` skips it", member.id),
+                Some(&format!("brok workspace sync {}", member.id)),
+            ),
+            _ if member.is_git() => {
+                report.line(Status::Ok, "member", &format!("{}: searchable (cloned by brok)", member.id), None)
+            }
             _ if member.is_workspace() => {
                 report.line(Status::Ok, "member", &format!("{}: searchable (own brokspace)", member.id), None);
             }

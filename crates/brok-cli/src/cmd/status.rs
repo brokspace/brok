@@ -94,6 +94,10 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
         for member in &members {
             let state = match member.state() {
                 brok_core::members::MemberState::Missing => style("missing").red().to_string(),
+                brok_core::members::MemberState::NotCloned => {
+                    style("not cloned (brok workspace sync)").yellow().to_string()
+                }
+                _ if member.is_git() => "searchable (cloned by brok)".to_owned(),
                 _ if member.is_workspace() => "searchable (own brokspace)".to_owned(),
                 _ => style("no brokspace of its own").dim().to_string(),
             };
@@ -164,7 +168,7 @@ async fn json_status(workspace: &Workspace) -> Result<Value> {
     let memories = memory_counts(workspace);
     let members: Vec<Value> = brok_core::members::Member::all(workspace)
         .iter()
-        .map(|m| json!({ "id": m.id, "root": m.root, "state": m.state(), "has_brokspace": m.is_workspace() }))
+        .map(|m| json!({ "id": m.id, "root": m.root, "state": m.state(), "has_brokspace": m.is_workspace(), "git": m.config.git }))
         .collect();
     let mut status = json!({
         "version": env!("CARGO_PKG_VERSION"),
