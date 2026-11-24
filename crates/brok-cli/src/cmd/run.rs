@@ -42,6 +42,7 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
         workspace_root: workspace.root().to_path_buf(),
         settings: serde_json::Value::Null,
         llm: serde_json::to_value(&workspace.config().llm)?,
+        members: brok_core::members::Member::all(&workspace).iter().filter_map(|m| m.info(&workspace)).collect(),
     };
 
     // CLI access.
