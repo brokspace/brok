@@ -22,6 +22,11 @@ adheres to [Semantic Versioning](https://semver.org/).
 - `brok doctor` lists the source-control provider with its contract version and
   capabilities, and checks each Meta Workspace member (brokspace/brok#109,
   brokspace/brok#108).
+- Meta Workspace members can be git URLs: `brok workspace add <git-url>`
+  (`--branch`, `--no-fetch`) clones the repository read only into
+  `.brokspace/members/<id>/` and indexes it; `brok workspace sync` pulls and
+  re-indexes; `remove` deletes what brok made. URLs with credentials are
+  refused (brokspace/brok#108).
 
 ### Fixed
 

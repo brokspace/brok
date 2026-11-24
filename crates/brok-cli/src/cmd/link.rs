@@ -224,7 +224,7 @@ pub async fn sync(workspace: &Workspace, names: &[String], verbose: bool) -> Res
     Ok(results)
 }
 
-async fn sync_one(workspace: &Workspace, link: &Link, verbose: bool) -> Result<Value> {
+pub(crate) async fn sync_one(workspace: &Workspace, link: &Link, verbose: bool) -> Result<Value> {
     let mut out = json!({ "name": link.name });
     if link.kind == LinkKind::Git {
         let spinner = verbose.then(|| ui::spinner(format!("Fetching {}", link.name)));
