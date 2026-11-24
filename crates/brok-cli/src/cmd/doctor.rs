@@ -254,6 +254,36 @@ async fn check_workspace(workspace: &Workspace, report: &mut Report) {
         }
     }
 
+    for provider in brok_core::provider::ProviderRegistry::builtin().list() {
+        let capabilities: Vec<&str> = provider.capabilities.iter().map(|c| c.as_str()).collect();
+        let detail = if capabilities.is_empty() {
+            format!("{} (contract v{})", provider.id, provider.contract_version)
+        } else {
+            format!("{} (contract v{}; {})", provider.id, provider.contract_version, capabilities.join(", "))
+        };
+        report.line(Status::Ok, "source control", &detail, None);
+    }
+
+    for member in brok_core::members::Member::all(workspace) {
+        match member.state() {
+            brok_core::members::MemberState::Missing => report.line(
+                Status::Warn,
+                "member",
+                &format!("{}: {} does not exist on this machine", member.id, member.root.display()),
+                Some(&format!("brok workspace remove {}   (or restore the directory)", member.id)),
+            ),
+            _ if member.is_workspace() => {
+                report.line(Status::Ok, "member", &format!("{}: searchable (own brokspace)", member.id), None);
+            }
+            _ => report.line(
+                Status::Warn,
+                "member",
+                &format!("{}: no Brokspace of its own, so `--scope workspace` skips it", member.id),
+                Some(&format!("brok -C {} init", member.root.display())),
+            ),
+        }
+    }
+
     if let Ok(links) = super::link::statuses(workspace).await {
         for link in links {
             match link.error {

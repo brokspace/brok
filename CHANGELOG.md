@@ -19,6 +19,9 @@ adheres to [Semantic Versioning](https://semver.org/).
 - The MCP tool `brok_search` accepts `scope: "workspace"` to search member
   repositories, and `brok status` (and `--json`, as `members`) lists them. Both
   only appear or change when a workspace has members.
+- `brok doctor` lists the source-control provider with its contract version and
+  capabilities, and checks each Meta Workspace member (brokspace/brok#109,
+  brokspace/brok#108).
 
 ### Fixed
 
