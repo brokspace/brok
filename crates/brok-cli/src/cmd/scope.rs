@@ -58,6 +58,43 @@ pub async fn search_members(workspace: &Workspace, text: &str, limit: usize) -> 
     (found, skipped)
 }
 
+/// `results` of `workspace` merged with those of its members: member hits are
+/// named `member:path`. The notes about members that were skipped are
+/// returned separately.
+pub async fn widen(
+    workspace: &Workspace,
+    text: &str,
+    limit: usize,
+    results: brok_sdk::prelude::SearchResults,
+) -> (brok_sdk::prelude::SearchResults, Vec<String>) {
+    let mut all = rank(results.hits, None);
+    let (members, skipped) = search_members(workspace, text, limit).await;
+    all.extend(members);
+    let mut merged = brok_sdk::prelude::SearchResults { hits: Vec::new(), semantic: results.semantic };
+    for found in merge(all, limit) {
+        let mut hit = found.hit;
+        if let Some(member) = found.member {
+            hit.path = format!("{member}:{}", hit.path);
+        }
+        merged.hits.push(hit);
+    }
+    (merged, skipped)
+}
+
+/// The hook `brok run` gives the index service for `scope: workspace` requests.
+pub fn widener(workspace: Workspace) -> brok_index::service::Widen {
+    std::sync::Arc::new(move |text, limit, results| {
+        let workspace = workspace.clone();
+        Box::pin(async move {
+            let (merged, skipped) = widen(&workspace, &text, limit, results).await;
+            for note in skipped {
+                tracing::debug!(%note, "member skipped in a workspace search");
+            }
+            merged
+        })
+    })
+}
+
 /// Scores `hits` relative to the best one.
 pub fn rank(hits: Vec<brok_sdk::prelude::SearchHit>, member: Option<String>) -> Vec<Found> {
     let best = hits.iter().map(|h| h.score).fold(0.0f32, f32::max);
