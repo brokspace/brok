@@ -323,6 +323,66 @@ pub fn obsidian_dir(paths: &WorkspacePaths, config: &BrokConfig) -> Option<PathB
     vault.is_dir().then(|| vault.join(folder))
 }
 
+/// The vault to search as a whole, when `memory.obsidian.search` is `vault`
+/// and the vault exists.
+pub fn obsidian_vault(paths: &WorkspacePaths, config: &BrokConfig) -> Option<PathBuf> {
+    let obsidian = &config.memory.obsidian;
+    if obsidian.search != crate::config::ObsidianSearch::Vault {
+        return None;
+    }
+    let vault = obsidian.vault.as_deref().map(str::trim).filter(|v| !v.is_empty())?;
+    let vault = crate::links::absolute(&paths.root, vault);
+    vault.is_dir().then_some(vault)
+}
+
+/// A note anywhere in a vault, read only. Its id is its path in the vault
+/// (spaces and unicode included), its tags come from the Obsidian properties
+/// (a list or `a, b` text) and `aliases` join the tags so they are findable.
+/// Secrets in the text are masked, because the result may reach an LLM.
+pub fn read_vault_note(path: &Path, relative: &str) -> Option<Memory> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let text = text.strip_prefix('\u{feff}').unwrap_or(&text).replace("\r\n", "\n");
+    let (front, body) = match split_front_matter(&text) {
+        Some((yaml, body)) => (serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml).unwrap_or_default(), body),
+        None => (serde_yaml_ng::Value::Null, text.as_str()),
+    };
+    let id = relative.strip_suffix(".md").unwrap_or(relative).to_owned();
+    let name = id.rsplit('/').next().unwrap_or(&id).to_owned();
+    let title = front
+        .get("title")
+        .and_then(serde_yaml_ng::Value::as_str)
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map_or(name, str::to_owned);
+    let mut tags = property_list(&front, "tags");
+    tags.extend(property_list(&front, "aliases"));
+    let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok().map(rfc3339_at).unwrap_or_default();
+    Some(Memory {
+        id,
+        title: mask_secrets(&title),
+        kind: Kind::Note,
+        scope: Scope::Obsidian,
+        tags: tags.iter().map(|tag| mask_secrets(tag)).collect(),
+        created: modified.clone(),
+        updated: modified,
+        source: None,
+        body: mask_secrets(body.trim()),
+        path: path.to_path_buf(),
+    })
+}
+
+/// An Obsidian property that is a list, or text separated by commas.
+fn property_list(front: &serde_yaml_ng::Value, key: &str) -> Vec<String> {
+    use serde_yaml_ng::Value;
+    let clean = |s: &str| s.trim().trim_start_matches('#').to_owned();
+    let values: Vec<String> = match front.get(key) {
+        Some(Value::Sequence(items)) => items.iter().filter_map(Value::as_str).map(clean).collect(),
+        Some(Value::String(text)) => text.split(',').map(clean).collect(),
+        _ => Vec::new(),
+    };
+    values.into_iter().filter(|v| !v.is_empty()).collect()
+}
+
 /// The user's global memories (`<config dir>/memory`).
 pub fn global_dir() -> Option<PathBuf> {
     crate::user::config_dir().map(|dir| dir.join("memory"))
@@ -556,6 +616,22 @@ mod tests {
 
         dirs.forget(&saved.id, Some(Scope::Obsidian)).unwrap();
         assert!(vault.join("Brokspace").join(FORGOTTEN_DIR).join(format!("{}.md", saved.id)).is_file());
+    }
+
+    #[test]
+    fn vault_notes_keep_their_path_as_id_and_read_obsidian_properties() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("Reunião de produto.md");
+        std::fs::write(
+            &path,
+            "---\ntags: \"checkout, #orders\"\naliases:\n  - Pedidos\n---\nSee [[Carrinho]]. token ghp_abcdefghijklmnopqrstuvwxyz0123456789\n",
+        )
+        .unwrap();
+        let note = read_vault_note(&path, "Projetos/Reunião de produto.md").unwrap();
+        assert_eq!(note.id, "Projetos/Reunião de produto");
+        assert_eq!(note.title, "Reunião de produto");
+        assert_eq!(note.tags, ["checkout", "orders", "Pedidos"]);
+        assert!(note.body.contains("[[Carrinho]]") && note.body.contains("[secret]"));
     }
 
     #[test]
