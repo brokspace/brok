@@ -24,6 +24,7 @@ Add `-v` (or `-vv`) to any command for more detail on stderr, and `--json` to
 | Search only matches words | Embeddings are off or the model is missing | `brok model download`, then `brok index` |
 | Results from a linked workspace are missing | The link is not indexed | `brok link list`, then `brok link sync <name>` |
 | Memories are not found | Memory is off | `brok config get memory`; `brok config set memory.enabled true` |
+| A workspace search skips a member | The member has no Brokspace of its own, or its index is unreadable | `brok workspace status`, then `brok init` and `brok index` in the member; see [Concepts](concepts.md#when-a-provider-or-member-is-unavailable) |
 | "another brok process is writing the index" | `brok run` is indexing | Wait, or `brok stop` before `brok index --rebuild` |
 
 ## Metrics

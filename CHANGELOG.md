@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Documentation
+
+- New Concepts page: Meta Workspace compared with a monorepo and a Git superproject, repository identity, local-first isolation, provider categories with their real status (available or planned), and step by step adoption.
+
 ## [0.7.0] - 2026-11-24
 
 ### Added
