@@ -45,7 +45,7 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
     // Reuse the running daemon (model already loaded) when there is one.
     let mut results = if daemon::is_running(&workspace).await {
         let (client, _inbox) = daemon::connect(&workspace).await?;
-        let request = SearchRequest { query: query.clone(), limit, focus };
+        let request = SearchRequest::new(query.clone()).limit(limit).focus(focus.clone());
         client.call::<SearchRequest, SearchResults>(&request, Duration::from_secs(60)).await?
     } else {
         let index = Index::open(&workspace, super::embedder_for_search(&workspace), Access::ReadOnly).await?;

@@ -212,7 +212,14 @@ async fn start_index_service(workspace: &Workspace, bus: &Bus, shutdown: &Cancel
     let options = ConnectOptions::new("brok-index", env!("CARGO_PKG_VERSION"), token.expose());
     match BrokClient::connect(bus.endpoint(), options).await {
         Ok((client, inbox)) => {
-            tasks.spawn(brok_index::service::serve(index, writable, client, inbox, shutdown.clone()));
+            tasks.spawn(brok_index::service::serve(
+                index,
+                writable,
+                Some(super::scope::widener(workspace.clone())),
+                client,
+                inbox,
+                shutdown.clone(),
+            ));
         }
         Err(e) => ui::error(&format!("index service cannot join the bus: {e:#}")),
     }

@@ -99,6 +99,10 @@ Each index scores on its own scale, so hits are ranked by their score relative t
 
 The MCP tool `brok_search` takes the same choice as an optional argument: `"scope": "workspace"` searches the members too, and each result is prefixed `member:path`. Without it the tool behaves as before, so an agent only crosses repositories when it asks to.
 
+### From your shards
+
+A shard learns the members from `client.context().members` (id, directory, whether the member has a Brokspace of its own) and can ask the index service to search them with `SearchRequest::new(text).scope(SearchScope::Workspace)` (`brok-sdk` 0.3). Hits from a member have their path prefixed with `member:`, and the index service ranks them like `brok search --scope workspace`. `brok-agent` uses it to answer questions across the workspace.
+
 ## Status
 
 `brok status` lists the members under "Meta Workspace members" (missing, with or without a Brokspace of its own), and `brok status --json` gains a `members` array with `id`, `root`, `state` and `has_brokspace`. The key is absent in a workspace without members, so the output of every other workspace is unchanged.
