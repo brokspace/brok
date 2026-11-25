@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `memory.obsidian.search: vault` searches every Markdown note of your Obsidian vault, read only, alongside your memories: hidden folders and `memory.obsidian.exclude` are skipped, `tags` and `aliases` are searchable, secrets are masked in results, and a size budget keeps large vaults within bounds. Off by default; brok still writes only to the memory folder (brokspace/brok#102).
+
 ### Documentation
 
 - New Concepts page: Meta Workspace compared with a monorepo and a Git superproject, repository identity, local-first isolation, provider categories with their real status (available or planned), and step by step adoption.

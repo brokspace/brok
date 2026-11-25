@@ -23,6 +23,7 @@ pub mod schema;
 mod search;
 pub mod service;
 pub mod store;
+mod vault;
 
 pub use embed::{EmbedKind, Embedder, ModelFiles, load_embedder};
 pub use index::{Access, Index, IndexReport, PartitionStatus, Progress};

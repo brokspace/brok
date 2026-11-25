@@ -4,17 +4,20 @@
 //!
 //! Memories are few and small, so they are not stored in the chunk store:
 //! the folders are read when they change (their modification times and
-//! sizes are compared on every search) and indexed in memory.
+//! sizes are compared on every search) and indexed in memory. A whole
+//! Obsidian vault (`memory.obsidian.search: vault`) is searched the same way,
+//! read only and within a size budget (see `vault`).
 
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
 
-use brok_core::memory::{Kind, Memory, Scope, load_dir};
+use brok_core::memory::{Kind, Memory, Scope, load_dir, obsidian_vault};
 use brok_core::{Link, MemoryDirs, Workspace};
 use brok_sdk::payload::SearchHit;
 
 use crate::bm25::Bm25Index;
+use crate::vault::Vault;
 
 /// Characters of a memory returned in a search hit.
 const MAX_HIT_CHARS: usize = 4_000;
@@ -47,6 +50,7 @@ struct Loaded {
 /// The memories visible from a workspace.
 pub(crate) struct MemorySearch {
     folders: Vec<Folder>,
+    vault: Option<Vault>,
     links: Vec<Entry>,
     loaded: Mutex<Option<Loaded>>,
 }
@@ -106,7 +110,14 @@ impl MemorySearch {
                 link_entries.push(Entry { memory, origin: Some(link.name.clone()), path });
             }
         }
-        Self { folders, links: link_entries, loaded: Mutex::new(None) }
+        let vault = obsidian_vault(workspace.paths(), workspace.config()).map(|root| {
+            let config = workspace.config();
+            // Notes of the memory folder are already loaded as memories.
+            let mut exclude = config.memory.obsidian.exclude.clone();
+            exclude.push(config.memory.obsidian.folder.clone());
+            Vault::new(root, exclude, config.index.max_file_kb * 1024)
+        });
+        Self { folders, vault, links: link_entries, loaded: Mutex::new(None) }
     }
 
     /// The best memories for `query`, scored by their relevance (0 to 1,
@@ -139,6 +150,7 @@ impl MemorySearch {
                 let count = std::fs::read_dir(&folder.dir).map_or(0, |entries| entries.count() as u64);
                 (modified, count)
             })
+            .chain(self.vault.as_ref().map(Vault::stamp))
             .collect()
     }
 
@@ -150,6 +162,12 @@ impl MemorySearch {
                 let path = format!("{}/{file}", folder.shown_as.trim_end_matches('/'));
                 entries.push(Entry { memory, origin: folder.origin.clone(), path });
             }
+        }
+        if let Some(vault) = &self.vault {
+            entries.extend(vault.load().into_iter().map(|(memory, relative)| {
+                let path = format!("{}/{relative}", vault.shown_as());
+                Entry { memory, origin: None, path }
+            }));
         }
         entries.extend(self.links.iter().cloned());
         entries.sort_by(|a, b| b.memory.updated.cmp(&a.memory.updated));
