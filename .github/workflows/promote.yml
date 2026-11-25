@@ -5,6 +5,10 @@ name: Promote
 on:
   push:
     branches: [staging, main]
+  # The release window: the version PR merges, and the release follows, when this runs.
+  schedule:
+    - cron: "0 12 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
