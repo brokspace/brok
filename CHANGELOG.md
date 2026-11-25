@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-24
+
 ### Added
 
 - The index service answers `SearchRequest` with `scope: workspace` by searching the Meta Workspace members too (`member:path` hits), so shards and agents can search across repositories. Requires `brok-sdk` 0.3.
