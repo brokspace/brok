@@ -287,3 +287,71 @@ fn a_git_member_with_credentials_or_a_bad_branch_is_refused_without_writing() {
     let search = json(&brok(&web, &["search", "dashboard", "--scope", "workspace", "--json"]));
     assert!(search["skipped_members"][0].as_str().unwrap().contains("not cloned yet"), "{search}");
 }
+
+/// A shard asks the index service for `scope: workspace` and gets the members' hits.
+#[cfg(unix)]
+#[test]
+fn the_index_service_widens_a_search_to_the_members() {
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    use brok_sdk::payload::{SearchRequest, SearchResults, SearchScope};
+    use brok_sdk::{BrokClient, ConnectOptions};
+
+    struct Daemon(std::process::Child);
+    impl Drop for Daemon {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    let root = tempfile::tempdir().unwrap();
+    let (web, api) = (root.path().join("web"), root.path().join("api"));
+    workspace_with(&web, "ui.rs", "fn render_dashboard() { /* draws the dashboard widgets */ }\n");
+    workspace_with(&api, "billing.rs", "fn compute_invoice_total() { /* invoice total with taxes */ }\n");
+    let add = brok(&web, &["workspace", "add", "../api", "--json"]);
+    assert!(add.status.success(), "add failed: {}", String::from_utf8_lossy(&add.stderr));
+
+    let _daemon = Daemon(
+        Command::new(env!("CARGO_BIN_EXE_brok"))
+            .args(["run", "--no-shards"])
+            .current_dir(&web)
+            .env("BROK_MODELS_DIR", web.join(".models"))
+            .env("BROK_CONFIG_DIR", web.join(".config"))
+            .env("NO_COLOR", "1")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("brok run starts"),
+    );
+
+    let workspace = brok_core::Workspace::open(&web).unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    runtime.block_on(async {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let client = loop {
+            if let Ok(token) = std::fs::read_to_string(workspace.paths().operator_token()) {
+                let options = ConnectOptions::new("test", "0.0.0", token.trim());
+                if let Ok((client, _inbox)) = BrokClient::connect(&workspace.endpoint(), options).await {
+                    break client;
+                }
+            }
+            assert!(Instant::now() < deadline, "the daemon did not start");
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        };
+        let ask = |scope| {
+            let client = client.clone();
+            async move {
+                let request = SearchRequest::new("invoice total").scope(scope);
+                client.call::<SearchRequest, SearchResults>(&request, Duration::from_secs(30)).await.unwrap()
+            }
+        };
+        let own = ask(SearchScope::Repository).await;
+        assert!(own.hits.is_empty(), "this repository has nothing about invoices");
+
+        let wide = ask(SearchScope::Workspace).await;
+        assert_eq!(wide.hits.len(), 1, "{:?}", wide.hits.iter().map(|h| &h.path).collect::<Vec<_>>());
+        assert_eq!(wide.hits[0].path, "api:billing.rs");
+    });
+}

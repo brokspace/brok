@@ -124,7 +124,7 @@ impl Server {
 
         let results = if daemon::is_running(workspace).await {
             let (client, _inbox) = daemon::connect(workspace).await.map_err(|e| format!("{e:#}"))?;
-            let request = SearchRequest { query: query.clone(), limit, focus: None };
+            let request = SearchRequest::new(query.clone()).limit(limit);
             client
                 .call::<SearchRequest, SearchResults>(&request, Duration::from_secs(60))
                 .await
@@ -145,17 +145,7 @@ impl Server {
                 .map_err(|e| format!("{e:#}"))?
         };
         if arguments.get("scope").and_then(Value::as_str) == Some("workspace") {
-            let mut all = scope::rank(results.hits, None);
-            let (members, skipped) = scope::search_members(workspace, &query, limit).await;
-            all.extend(members);
-            let mut merged = SearchResults { hits: Vec::new(), semantic: results.semantic };
-            for found in scope::merge(all, limit) {
-                let mut hit = found.hit;
-                if let Some(member) = found.member {
-                    hit.path = format!("{member}:{}", hit.path);
-                }
-                merged.hits.push(hit);
-            }
+            let (merged, skipped) = scope::widen(workspace, &query, limit, results).await;
             let mut text = render(&query, &merged);
             for note in skipped {
                 text.push_str(&format!("(member skipped, {note})\n"));

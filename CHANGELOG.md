@@ -8,6 +8,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The index service answers `SearchRequest` with `scope: workspace` by searching the Meta Workspace members too (`member:path` hits), so shards and agents can search across repositories. Requires `brok-sdk` 0.3.
 - Shards learn the Meta Workspace members through `client.context().members` (id, directory, whether the member has a Brokspace of its own), so an agent can search the repositories around its workspace. Requires `brok-sdk` 0.2.
 
 ## [0.6.0] - 2026-11-23

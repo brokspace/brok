@@ -5,10 +5,12 @@
 //!   update is announced with `index:updated`.
 
 use std::collections::BTreeSet;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use brok_sdk::payload::{FileChanged, IndexUpdated, SearchRequest, SearchResults, topics};
+use brok_sdk::payload::{FileChanged, IndexUpdated, SearchRequest, SearchResults, SearchScope, topics};
 use brok_sdk::{BrokClient, Inbox, TopicPattern};
 use tokio::sync::RwLock;
 use tokio::time::Instant;
@@ -19,6 +21,13 @@ use crate::search::SearchQuery;
 
 /// Quiet period before a burst of file changes is applied.
 const DEBOUNCE: Duration = Duration::from_millis(400);
+
+/// Widens a workspace's own results with those of its Meta Workspace members:
+/// given the query text, the limit and the workspace's results, it returns
+/// the merged results. Supplied by `brok run`, which knows the members; the
+/// index itself knows only its own workspace.
+pub type Widen =
+    Arc<dyn Fn(String, usize, SearchResults) -> Pin<Box<dyn Future<Output = SearchResults> + Send>> + Send + Sync>;
 
 /// Topics the index service publishes.
 pub fn publishes() -> Vec<TopicPattern> {
@@ -32,8 +41,17 @@ pub fn subscribes() -> Vec<TopicPattern> {
 
 /// Serves the index on the bus until `shutdown` fires or the connection
 /// closes. `writable` is false when the index could only be opened
-/// read-only (changes are then ignored with a warning).
-pub async fn serve(index: Index, writable: bool, client: BrokClient, mut inbox: Inbox, shutdown: CancellationToken) {
+/// read-only (changes are then ignored with a warning). `widen` answers
+/// requests whose scope is the whole Meta Workspace; without it they get this
+/// workspace's results.
+pub async fn serve(
+    index: Index,
+    writable: bool,
+    widen: Option<Widen>,
+    client: BrokClient,
+    mut inbox: Inbox,
+    shutdown: CancellationToken,
+) {
     let index = Arc::new(RwLock::new(index));
     if let Err(e) = client.subscribe(subscribes()).await {
         tracing::error!(error = %e, "index service cannot subscribe");
@@ -61,7 +79,9 @@ pub async fn serve(index: Index, writable: bool, client: BrokClient, mut inbox: 
                 if let Ok(request) = event.decode::<SearchRequest>() {
                     let index = Arc::clone(&index);
                     let client = client.clone();
+                    let widen = widen.clone();
                     tokio::spawn(async move {
+                        let (text, limit, scope) = (request.query.clone(), request.limit, request.scope);
                         let query = SearchQuery { text: request.query, limit: request.limit, focus: request.focus };
                         let results = match index.read().await.search(&query).await {
                             Ok(results) => results,
@@ -69,6 +89,10 @@ pub async fn serve(index: Index, writable: bool, client: BrokClient, mut inbox: 
                                 tracing::warn!(error = %e, "search failed");
                                 SearchResults::default()
                             }
+                        };
+                        let results = match (scope, widen) {
+                            (SearchScope::Workspace, Some(widen)) => widen(text, limit, results).await,
+                            _ => results,
                         };
                         if let Err(e) = client.reply(&event, &results).await {
                             tracing::debug!(error = %e, "cannot deliver search results");
