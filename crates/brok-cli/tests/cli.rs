@@ -343,8 +343,18 @@ fn the_index_service_widens_a_search_to_the_members() {
         let ask = |scope| {
             let client = client.clone();
             async move {
+                // The index service answers once it has loaded; a loaded CI runner can take a while,
+                // so a timeout is retried until the deadline instead of failing the test.
                 let request = SearchRequest::new("invoice total").scope(scope);
-                client.call::<SearchRequest, SearchResults>(&request, Duration::from_secs(30)).await.unwrap()
+                loop {
+                    match client.call::<SearchRequest, SearchResults>(&request, Duration::from_secs(10)).await {
+                        Ok(results) => break results,
+                        Err(error) => {
+                            assert!(Instant::now() < deadline, "the index service did not answer: {error}");
+                            tokio::time::sleep(Duration::from_millis(500)).await;
+                        }
+                    }
+                }
             }
         };
         let own = ask(SearchScope::Repository).await;
