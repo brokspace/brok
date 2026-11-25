@@ -139,6 +139,8 @@ your workspaces, so `brok init` in the next project takes seconds.
 | | |
 |---|---|
 | **[Getting started](docs/getting-started.md)** | **Step by step: install, first workspace, daily use, configuration, troubleshooting** |
+| [Concepts](docs/concepts.md) | Meta Workspace vs monorepo, providers, local-first isolation, what is available and planned |
+| [Meta Workspace](docs/meta-workspace.md) | Coordinate several repositories: members, relationships, scoped search |
 | [Local LLM setup](docs/local-llm.md) | Ollama / LM Studio, which model fits your machine |
 | [Memory and linked workspaces](docs/memory.md) | What Brokspace remembers, and the workspaces yours depends on |
 | [Obsidian](docs/obsidian.md) | Use an Obsidian vault (local or cloud-synced) as memory and second brain |
