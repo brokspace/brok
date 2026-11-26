@@ -82,6 +82,7 @@ applies it to every new workspace, so you choose a model once per machine.
 | `obsidian.vault` | unset | Folder of an Obsidian vault to use as one more memory store (`--scope obsidian`). Local or cloud-synced; it must exist. See [obsidian.md](obsidian.md). |
 | `obsidian.folder` | `Brokspace` | Folder inside the vault where brok reads and writes memories (relative, no `..`). |
 | `obsidian.search` | `folder` | `vault` also searches every note of the vault, read only. See [obsidian.md](obsidian.md#searching-the-whole-vault). |
+| `obsidian.names` | `id` | `title` names new notes after their title (`Use Redis.md`). See [obsidian.md](obsidian.md#readable-names-links-and-export). |
 | `obsidian.exclude` | `[]` | Folders, files or globs of the vault never searched. |
 
 See [memory.md](memory.md) for where memories live and how they are captured.
