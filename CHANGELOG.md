@@ -9,6 +9,11 @@ adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Faster text search for common words: only the results that are returned get sorted, with the same ranking and scores (brokspace/brok#162).
+- Indexing no longer keeps a list of every workspace file in memory while it looks for changes (brokspace/brok#72).
+
+### Fixed
+
+- `brok start` returns once the index service can answer, and commands that reach a daemon that is still starting wait for it, instead of timing out after 60 seconds (brokspace/brok#179).
 
 ## [0.9.0] - 2026-11-26
 

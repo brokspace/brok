@@ -41,6 +41,9 @@ pub struct BusStats {
     pub connections: usize,
     /// Identities of the open sessions, sorted.
     pub identities: Vec<String>,
+    /// Identities of the sessions that have subscribed to something, sorted:
+    /// requests published from now on reach them.
+    pub subscribed: Vec<String>,
     /// Events accepted for routing.
     pub published: u64,
     /// Event deliveries to clients.
@@ -143,7 +146,15 @@ impl Router {
             Command::Stats { reply } => {
                 let mut identities: Vec<String> = self.connections.values().map(|c| c.grant.identity.clone()).collect();
                 identities.sort();
-                let _ = reply.send(BusStats { connections: self.connections.len(), identities, ..self.stats.clone() });
+                let mut subscribed: Vec<String> = self
+                    .connections
+                    .values()
+                    .filter(|c| !c.subscriptions.is_empty())
+                    .map(|c| c.grant.identity.clone())
+                    .collect();
+                subscribed.sort();
+                let connections = self.connections.len();
+                let _ = reply.send(BusStats { connections, identities, subscribed, ..self.stats.clone() });
             }
         }
     }

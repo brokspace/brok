@@ -33,18 +33,36 @@ pub struct DaemonStatusReply {
     pub pid: u32,
     /// Connected identities (shards and services).
     pub identities: Vec<String>,
+    /// Services still starting, which cannot receive requests yet. A daemon
+    /// from before this field sends none.
+    #[serde(default)]
+    pub starting: Vec<String>,
 }
 impl Payload for DaemonStatusReply {
     const TOPIC: &'static str = "daemon:status.result";
 }
+
+/// Bus identity of the index service.
+pub const INDEX_SERVICE: &str = "brok-index";
+
+/// How long to wait for a starting daemon.
+const READY_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Whether `brok run` is serving this workspace.
 pub async fn is_running(workspace: &Workspace) -> bool {
     transport::is_listening(&workspace.endpoint()).await
 }
 
-/// Connects to the running daemon with the operator token.
+/// Connects to the running daemon once its index service can answer: a
+/// request published before the service subscribed would reach nobody.
 pub async fn connect(workspace: &Workspace) -> Result<(BrokClient, Inbox)> {
+    let connection = connect_now(workspace).await?;
+    wait_started(&connection.0, &[INDEX_SERVICE], READY_TIMEOUT).await;
+    Ok(connection)
+}
+
+/// Connects without waiting for the daemon to finish starting.
+async fn connect_now(workspace: &Workspace) -> Result<(BrokClient, Inbox)> {
     if !is_running(workspace).await {
         bail!("brok is not running in this workspace. Start it with `brok start` (or `brok run` in a terminal)");
     }
@@ -55,18 +73,37 @@ pub async fn connect(workspace: &Workspace) -> Result<(BrokClient, Inbox)> {
     BrokClient::connect(&workspace.endpoint(), options).await.context("connecting to the brok event bus")
 }
 
-/// Connects, starting the daemon in the background first when needed.
+/// Waits until none of `services` is still starting. Gives up quietly after
+/// `timeout`: the request that follows reports what is wrong.
+async fn wait_started(client: &BrokClient, services: &[&str], timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        // No answer means the control service is not listening yet.
+        if let Ok(status) =
+            client.call::<DaemonStatus, DaemonStatusReply>(&DaemonStatus {}, Duration::from_millis(500)).await
+            && !status.starting.iter().any(|s| services.contains(&s.as_str()))
+        {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Connects, starting the daemon in the background first when needed, and
+/// waits for the agent too: callers of this ask it something.
 pub async fn connect_or_start(workspace: &Workspace) -> Result<(BrokClient, Inbox)> {
     if !is_running(workspace).await {
         ui::note("Starting brok in the background (stop it with `brok stop`)");
         start(workspace).await?;
     }
-    connect(workspace).await
+    let connection = connect(workspace).await?;
+    wait_started(&connection.0, &[SYSTEM_AGENT], READY_TIMEOUT).await;
+    Ok(connection)
 }
 
 /// The daemon's view of who is connected (`None` when it does not answer).
 pub async fn status(workspace: &Workspace) -> Option<DaemonStatusReply> {
-    let (client, _inbox) = connect(workspace).await.ok()?;
+    let (client, _inbox) = connect_now(workspace).await.ok()?;
     client.call::<DaemonStatus, DaemonStatusReply>(&DaemonStatus {}, Duration::from_secs(3)).await.ok()
 }
 
@@ -76,7 +113,7 @@ pub fn log_file(workspace: &Workspace) -> PathBuf {
 }
 
 /// Starts `brok run` detached from the terminal and waits until it is ready
-/// (bus listening and, when installed, the agent connected).
+/// (index service listening and, when installed, the agent too).
 pub async fn start(workspace: &Workspace) -> Result<u32> {
     if is_running(workspace).await {
         bail!("brok is already running for {}", workspace.root().display());
@@ -100,7 +137,7 @@ pub async fn start(workspace: &Workspace) -> Result<u32> {
     let pid = child.id();
     drop(child); // the daemon outlives this process
 
-    wait_ready(workspace, pid, Duration::from_secs(30)).await?;
+    wait_ready(workspace, pid, READY_TIMEOUT).await?;
     Ok(pid)
 }
 
@@ -161,15 +198,12 @@ async fn wait_ready(workspace: &Workspace, pid: u32, timeout: Duration) -> Resul
     let expect_agent = workspace.config().shard_enabled(SYSTEM_AGENT)
         && Registry::new(workspace.paths()).get(SYSTEM_AGENT).ok().flatten().is_some_and(|s| s.is_runnable());
     loop {
-        if is_running(workspace).await {
-            if !expect_agent {
-                return Ok(());
-            }
-            if let Some(status) = status(workspace).await
-                && status.identities.iter().any(|i| i == SYSTEM_AGENT)
-            {
-                return Ok(());
-            }
+        if is_running(workspace).await
+            && let Some(status) = status(workspace).await
+            && status.starting.is_empty()
+            && (!expect_agent || status.identities.iter().any(|i| i == SYSTEM_AGENT))
+        {
+            return Ok(());
         }
         if Instant::now() > deadline {
             bail!(
@@ -190,7 +224,7 @@ pub async fn stop(workspace: &Workspace) -> Result<bool> {
         return Ok(false);
     }
     let pid = std::fs::read_to_string(workspace.paths().pid_file()).ok().and_then(|s| s.trim().parse::<u32>().ok());
-    let (client, _inbox) = connect(workspace).await?;
+    let (client, _inbox) = connect_now(workspace).await?;
     client.emit(&DaemonStop {}).await?;
     drop(client);
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -213,7 +247,78 @@ fn process_alive(pid: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::process_alive;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    use brok_bus::{Bus, Grant};
+    use brok_core::Workspace;
+    use brok_sdk::payload::{SearchRequest, SearchResults};
+    use brok_sdk::{BrokClient, ConnectOptions, TopicPattern};
+    use tokio_util::sync::CancellationToken;
+
+    use super::{DaemonStatus, DaemonStatusReply, INDEX_SERVICE, connect, process_alive};
+
+    async fn service(bus: &Bus, name: &str, topics: &str) -> (BrokClient, brok_sdk::Inbox) {
+        let pattern = TopicPattern::new(topics).unwrap();
+        let namespace = TopicPattern::new(format!("{}:*", topics.split(':').next().unwrap())).unwrap();
+        let grant = Grant::service(name, vec![namespace], vec![pattern]);
+        let token = bus.authenticator().issue(grant);
+        let options = ConnectOptions::new(name, "0.0.0", token.expose());
+        BrokClient::connect(bus.endpoint(), options).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_search_waits_for_a_slow_index_service() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".brokspace/run")).unwrap();
+        std::fs::write(dir.path().join(".brokspace/brok.yml"), "version: 1\n").unwrap();
+        let workspace = Workspace::open(dir.path()).unwrap();
+        let shutdown = CancellationToken::new();
+        let bus = Bus::start(workspace.endpoint(), shutdown.clone()).unwrap();
+        let context = brok_sdk::frame::ShardContext {
+            workspace_root: dir.path().to_path_buf(),
+            settings: serde_json::Value::Null,
+            llm: serde_json::Value::Null,
+            members: Vec::new(),
+        };
+        let operator = bus.authenticator().issue(Grant::operator(context));
+        std::fs::write(workspace.paths().operator_token(), operator.expose()).unwrap();
+
+        let ready = Arc::new(AtomicBool::new(false));
+        let (control, mut requests) = service(&bus, "brok-daemon", "daemon:status").await;
+        control.subscribe([TopicPattern::new("daemon:status").unwrap()]).await.unwrap();
+        let answering = Arc::clone(&ready);
+        tokio::spawn(async move {
+            while let Some(event) = requests.recv().await {
+                if event.is::<DaemonStatus>() {
+                    let starting =
+                        if answering.load(Ordering::SeqCst) { vec![] } else { vec![INDEX_SERVICE.to_owned()] };
+                    let reply = DaemonStatusReply { starting, ..Default::default() };
+                    control.reply(&event, &reply).await.unwrap();
+                }
+            }
+        });
+        // The index service joins late, as when a model takes a while to load.
+        let index_bus = bus.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            let (client, mut inbox) = service(&index_bus, INDEX_SERVICE, "index:search").await;
+            client.subscribe([TopicPattern::new("index:search").unwrap()]).await.unwrap();
+            while !index_bus.stats().await.subscribed.iter().any(|s| s == INDEX_SERVICE) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            ready.store(true, Ordering::SeqCst);
+            while let Some(event) = inbox.recv().await {
+                client.reply(&event, &SearchResults::default()).await.unwrap();
+            }
+        });
+
+        let (client, _inbox) = connect(&workspace).await.unwrap();
+        let request = SearchRequest::new("anything");
+        client.call::<SearchRequest, SearchResults>(&request, Duration::from_secs(5)).await.unwrap();
+        shutdown.cancel();
+    }
 
     #[test]
     fn process_alive_tracks_exit() {
