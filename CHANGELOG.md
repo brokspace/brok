@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `brok start` returns once the index service can answer, and commands that reach a daemon that is still starting wait for it, instead of timing out after 60 seconds (brokspace/brok#179).
+
 ## [0.9.0] - 2026-11-26
 
 ### Added
