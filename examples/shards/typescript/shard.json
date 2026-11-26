@@ -1,0 +1,35 @@
+{
+  "$schema": "https://raw.githubusercontent.com/brokspace/brok-sdk/main/shard.schema.json",
+  "name": "todo-typescript",
+  "version": "0.1.0",
+  "description": "Example shard in TypeScript: reports TODO and FIXME lines and searches the index",
+  "license": "MIT OR Apache-2.0",
+  "brok": ">=0.8.0, <1.0.0",
+  "entrypoint": "bin/todo-typescript",
+  "build": {
+    "command": [
+      "node",
+      "build.mjs"
+    ],
+    "artifact": "dist/todo-typescript"
+  },
+  "permissions": {
+    "filesystem": {
+      "read": [
+        "."
+      ]
+    },
+    "network": false,
+    "process": [
+      "node"
+    ]
+  },
+  "subscribes_to": [
+    "file:changed",
+    "todo-typescript:ask"
+  ],
+  "publishes_to": [
+    "todo-typescript:*",
+    "index:search"
+  ]
+}
