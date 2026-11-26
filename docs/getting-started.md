@@ -109,7 +109,10 @@ It walks through six steps and asks before anything big:
 | 5. Index | Indexes your code (functions, classes and sections, not raw text) |
 | 6. Coding agents | Connects Claude Code, Cursor, VS Code or Codex (skills + search tool) |
 
-Want no questions? `brok init --yes` accepts every recommendation.
+Want no questions? `brok init --yes` accepts every recommendation, including
+the agent files of step 6. Without a terminal and without `--yes`, nothing is
+written into your project outside `.brokspace/`. To see what step 6 would
+write: `brok setup agents --dry-run`.
 Then check the result:
 
 ```sh

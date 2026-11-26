@@ -29,9 +29,32 @@ pub struct Args {
     /// Accept the detected agents without asking.
     #[arg(short, long)]
     pub yes: bool,
+    /// Only list the files that would be written.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// With `--dry-run`, print JSON.
+    #[arg(long, requires = "dry_run")]
+    pub json: bool,
 }
 
 pub async fn run(cwd: &Path, args: Args) -> Result<()> {
+    if args.dry_run {
+        // Also answers before `brok init`, so a setup can ask first.
+        let root = brok_core::Workspace::discover(cwd).map_or_else(|_| cwd.to_path_buf(), |w| w.root().to_path_buf());
+        let agents = if args.agent.is_empty() { integrations::detect(&root) } else { args.agent.clone() };
+        let files = integrations::planned_files(&root, &agents, !args.no_skills, !args.no_mcp);
+        if args.json {
+            println!("{}", serde_json::json!({ "files": files }));
+        } else if files.is_empty() {
+            ui::step("Nothing would be written into this project.");
+        } else {
+            ui::step("Would write into this project:");
+            for file in files {
+                ui::hint(&format!("  {file}"));
+            }
+        }
+        return Ok(());
+    }
     let workspace = crate::cmd::workspace(cwd)?;
     configure(&workspace, &args)
 }
