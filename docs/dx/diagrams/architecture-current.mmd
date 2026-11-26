@@ -1,0 +1,13 @@
+flowchart LR
+    subgraph Editors
+        VS[VS Code extension]
+        AG[Coding agents]
+    end
+    VS -- "runs brok, reads --json" --> CLI[brok CLI]
+    AG -- "MCP over stdio" --> MCP[brok mcp] --> CLI
+    CLI -- "local socket" --> BUS[(event bus)]
+    CLI -- "reads when stopped" --> IDX[(index in .brokspace)]
+    BUS <--> SVC[index service] --> IDX
+    BUS <--> AGENT[brok-agent shard]
+    BUS <--> SH[other shards]
+    AGENT -- "OpenAI compatible HTTP" --> LLM[local or hosted model]

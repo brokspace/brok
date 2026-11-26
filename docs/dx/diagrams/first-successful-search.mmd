@@ -1,0 +1,10 @@
+%% Target: text results first, meaning based results when vectors are ready.
+flowchart LR
+    S[Setup starts] --> T[Scan and chunk]
+    T --> K[Keyword index saved]:::new
+    K --> Q[Search usable: label text only]:::new
+    K --> E[Embed in batches, saved as it goes]:::new
+    E --> H[Search upgrades to hybrid]
+    E -- cancelled or failed --> R[Keeps what is done, resumes later]:::new
+    R --> Q
+    classDef new stroke-dasharray: 5 5
