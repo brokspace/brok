@@ -30,6 +30,8 @@ pub enum Command {
     Show(IdArgs),
     /// Forget a memory (private and global ones are moved to .forgotten/).
     Forget(IdArgs),
+    /// Copy the private and shared memories into your Obsidian vault.
+    Export(ExportArgs),
 }
 
 /// Arguments of `brok memory add`.
@@ -95,10 +97,21 @@ pub struct SearchArgs {
     json: bool,
 }
 
+/// Arguments of `brok memory export`.
+#[derive(Debug, clap::Args)]
+pub struct ExportArgs {
+    /// Export to the Obsidian vault (`memory.obsidian`), the one destination today.
+    #[arg(long, required = true)]
+    obsidian: bool,
+    /// Print JSON.
+    #[arg(long)]
+    json: bool,
+}
+
 /// Arguments of `brok memory show` and `forget`.
 #[derive(Debug, clap::Args)]
 pub struct IdArgs {
-    /// Memory id (the file name without `.md`).
+    /// Memory id (the file name without `.md`, or the `id` property of a note in your vault).
     id: String,
     /// Look only in this scope.
     #[arg(short, long)]
@@ -121,6 +134,22 @@ pub async fn run(cwd: &Path, command: Command) -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&memory)?);
             } else {
                 print_memory(&memory);
+            }
+            Ok(())
+        }
+        Command::Export(args) => {
+            if !workspace.config().memory.enabled {
+                bail!("memory is off in this workspace (memory.enabled in brok.yml)");
+            }
+            let export = dirs.export_to_obsidian()?;
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&export)?);
+            } else {
+                ui::success(&format!(
+                    "Exported {} memories to the vault ({} already up to date)",
+                    export.written, export.unchanged
+                ));
+                ui::hint(&dirs.dir(Scope::Obsidian)?.display().to_string());
             }
             Ok(())
         }

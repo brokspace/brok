@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-26
+
+### Added
+
+- A step-by-step guide, `docs/shard-tutorial.md`, builds a complete shard from an empty folder; the shard reference lists the shards made by Brokspace, and its examples and the `write-shard` skill declare a `brok` range that includes current releases.
+- `memory.obsidian.read_only` searches a vault brok must never write to, such as the mirror of a remote vault (brokspace/brok#104).
+- Obsidian notes for a better graph: `memory.obsidian.names: title` names new notes after their title (the id stays in the note, so renaming the file never breaks updates), notes link related memories as `[[wikilinks]]` and list the files they mention, properties you add are kept, and `brok memory export --obsidian` copies your private and shared memories into the vault (brokspace/brok#103).
+
 ## [0.8.0] - 2026-11-26
 
 ### Added

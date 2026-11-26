@@ -16,6 +16,7 @@
 //! history. Secrets (API keys, tokens, private keys, passwords) are masked
 //! before anything is written.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -23,7 +24,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::config::BrokConfig;
+use crate::config::{BrokConfig, ObsidianNames};
 use crate::error::{CoreError, Result};
 use crate::workspace::WorkspacePaths;
 
@@ -120,10 +121,28 @@ impl std::str::FromStr for Kind {
     }
 }
 
+/// Longest file name (without `.md`) made from a title.
+const MAX_NAME_CHARS: usize = 80;
+/// Titles shorter than this are too common to count as a mention.
+const MIN_MENTION_CHARS: usize = 8;
+/// Most related memories linked from one note.
+const MAX_RELATED: usize = 5;
+/// Most mentioned files listed in one note.
+const MAX_FILES: usize = 10;
+
+/// What `export_to_obsidian` did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct Export {
+    /// Notes created or updated.
+    pub written: usize,
+    /// Notes already up to date.
+    pub unchanged: usize,
+}
+
 /// One memory.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Memory {
-    /// File name without `.md`; unique within its scope.
+    /// Unique within its scope: the file name without `.md`, or the `id` property of an Obsidian note.
     pub id: String,
     /// One line summary.
     pub title: String,
@@ -176,6 +195,21 @@ struct Front {
     updated: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     source: Option<String>,
+    /// Kept in Obsidian notes, whose file may be named after the title or renamed by the user.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    /// Other names of an Obsidian note, so `[[id]]` links reach it.
+    #[serde(skip_serializing_if = "serde_yaml_ng::Value::is_null")]
+    aliases: serde_yaml_ng::Value,
+    /// Wikilinks to related memories (Obsidian draws them in the graph).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    related: Vec<String>,
+    /// Workspace files the note mentions.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    files: Vec<String>,
+    /// Properties the user added: kept when brok rewrites the note.
+    #[serde(flatten)]
+    extra: BTreeMap<String, serde_yaml_ng::Value>,
 }
 
 /// The memory folders of a workspace.
@@ -189,6 +223,10 @@ pub struct MemoryDirs {
     pub global: Option<PathBuf>,
     /// `<vault>/<folder>/`, when an Obsidian vault is configured and exists.
     pub obsidian: Option<PathBuf>,
+    /// How new notes in the vault are named (`memory.obsidian.names`).
+    pub obsidian_names: ObsidianNames,
+    /// The vault is configured as read only, so the `obsidian` scope cannot be written.
+    pub obsidian_read_only: bool,
 }
 
 impl MemoryDirs {
@@ -199,6 +237,8 @@ impl MemoryDirs {
             shared: paths.shared_memory.clone(),
             global: config.memory.global.then(global_dir).flatten(),
             obsidian: obsidian_dir(paths, config),
+            obsidian_names: config.memory.obsidian.names,
+            obsidian_read_only: config.memory.obsidian.read_only,
         }
     }
 
@@ -210,6 +250,10 @@ impl MemoryDirs {
             Scope::Global => self.global.as_deref().ok_or_else(|| {
                 CoreError::Config("global memories are off (memory.global) or the config directory is unknown".into())
             }),
+            Scope::Obsidian if self.obsidian_read_only => Err(CoreError::Config(
+                "the Obsidian vault is read only (memory.obsidian.read_only): save to another scope, or write in Obsidian"
+                    .into(),
+            )),
             Scope::Obsidian => self.obsidian.as_deref().ok_or_else(|| {
                 CoreError::Config(
                     "no Obsidian vault: set memory.obsidian.vault in brok.yml to an existing vault folder \
@@ -248,12 +292,17 @@ impl MemoryDirs {
         self.all()
             .into_iter()
             .filter(|(s, _)| scope.is_none_or(|wanted| wanted == *s))
-            .find_map(|(s, dir)| read(&dir.join(format!("{id}.md")), s))
+            .find_map(|(s, dir)| find_in(dir, s, id))
     }
 
     /// Saves a memory in `scope`: a new one, or a replacement when `new.id`
     /// names an existing one.
     pub fn save(&self, scope: Scope, new: NewMemory) -> Result<Memory> {
+        self.write(scope, new, None)
+    }
+
+    /// `save`, optionally keeping the creation and update times of a copied memory.
+    fn write(&self, scope: Scope, new: NewMemory, stamps: Option<(String, String)>) -> Result<Memory> {
         let dir = self.dir(scope)?;
         let title = mask_secrets(new.title.trim());
         if title.is_empty() {
@@ -269,26 +318,78 @@ impl MemoryDirs {
             body.push_str("\n\n…");
         }
         let now = now_rfc3339();
-        let (id, created) = match new.id {
-            Some(id) => {
-                if !is_id(&id) {
-                    return Err(CoreError::Config(format!(
-                        "`{id}` is not a valid memory id (letters, digits, `-` and `_`)"
-                    )));
-                }
-                let created = read(&dir.join(format!("{id}.md")), scope).map_or_else(|| now.clone(), |m| m.created);
-                (id, created)
+        if let Some(id) = new.id.as_deref().filter(|id| !is_id(id)) {
+            return Err(CoreError::Config(format!("`{id}` is not a valid memory id (letters, digits, `-` and `_`)")));
+        }
+        // The note being replaced, wherever its file now is.
+        let existing = new.id.as_deref().and_then(|id| find_in(dir, scope, id));
+        let id = match new.id {
+            Some(id) => id,
+            None => unique_id(dir, scope, &title, &now),
+        };
+        let path = match &existing {
+            Some(memory) => memory.path.clone(),
+            None if scope == Scope::Obsidian && self.obsidian_names == ObsidianNames::Title => {
+                dir.join(format!("{}.md", unique_name(dir, &title, &id)))
             }
-            None => (unique_id(dir, &title, &now), now.clone()),
+            None => dir.join(format!("{id}.md")),
+        };
+        let (created, updated) = match stamps {
+            Some(stamps) => stamps,
+            None => (existing.as_ref().map_or_else(|| now.clone(), |m| m.created.clone()), now),
         };
         let mut tags: Vec<String> = new.tags.iter().map(|t| t.trim().to_owned()).filter(|t| !t.is_empty()).collect();
         tags.sort();
         tags.dedup();
-        let front = Front { title, kind: new.kind, tags, created, updated: now, source: new.source };
+        let mut front = Front { title, kind: new.kind, tags, created, updated, source: new.source, ..Front::default() };
+        if scope == Scope::Obsidian {
+            if let Some(old) = existing.as_ref().and_then(|m| read_front(&m.path)) {
+                front.aliases = old.aliases;
+                front.extra = old.extra;
+            }
+            front.id = Some(id.clone());
+            let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or(&id);
+            if file_stem != id && front.aliases.is_null() {
+                front.aliases = serde_yaml_ng::Value::Sequence(vec![id.clone().into()]);
+            }
+            front.related = related_links(&load_dir(dir, scope), &id, &front.title, &body, &front.tags);
+            front.files = mentioned_files(&body);
+        }
         let yaml = serde_yaml_ng::to_string(&front).map_err(|e| CoreError::Config(e.to_string()))?;
-        let path = dir.join(format!("{id}.md"));
         crate::fsutil::write_atomic(&path, format!("---\n{yaml}---\n\n{body}\n").as_bytes())?;
         read(&path, scope).ok_or_else(|| CoreError::Config(format!("{}: cannot read back the memory", path.display())))
+    }
+
+    /// Copies the private and shared memories into the Obsidian folder, keeping
+    /// their ids and dates. A note already there and not older is left alone,
+    /// so running it again changes nothing. Session records are not copied.
+    pub fn export_to_obsidian(&self) -> Result<Export> {
+        let target = self.dir(Scope::Obsidian)?;
+        let mut export = Export::default();
+        let mut sources: Vec<Memory> = [(Scope::Private, &self.private), (Scope::Shared, &self.shared)]
+            .into_iter()
+            .flat_map(|(scope, dir)| load_dir(dir, scope))
+            .filter(|m| m.kind != Kind::Session && is_id(&m.id))
+            .collect();
+        // Oldest first, so later notes can link to earlier ones.
+        sources.sort_by(|a, b| a.created.cmp(&b.created).then_with(|| a.id.cmp(&b.id)));
+        for memory in sources {
+            if find_in(target, Scope::Obsidian, &memory.id).is_some_and(|there| there.updated >= memory.updated) {
+                export.unchanged += 1;
+                continue;
+            }
+            let new = NewMemory {
+                id: Some(memory.id),
+                title: memory.title,
+                body: memory.body,
+                kind: memory.kind,
+                tags: memory.tags,
+                source: memory.source,
+            };
+            self.write(Scope::Obsidian, new, Some((memory.created, memory.updated)))?;
+            export.written += 1;
+        }
+        Ok(export)
     }
 
     /// Forgets a memory: private and global ones move to `.forgotten/`,
@@ -300,7 +401,11 @@ impl MemoryDirs {
         } else {
             let dir = memory.path.parent().unwrap_or_else(|| Path::new(".")).join(FORGOTTEN_DIR);
             std::fs::create_dir_all(&dir).map_err(|e| CoreError::io(&dir, e))?;
-            let target = dir.join(format!("{}.md", memory.id));
+            let name = memory.path.file_stem().and_then(|s| s.to_str()).unwrap_or(&memory.id);
+            let mut target = dir.join(format!("{name}.md"));
+            if target.exists() {
+                target = dir.join(format!("{name} {}.md", memory.id));
+            }
             std::fs::rename(&memory.path, &target).map_err(|e| CoreError::io(&target, e))?;
         }
         Ok(memory)
@@ -315,7 +420,8 @@ impl MemoryDirs {
 pub fn obsidian_dir(paths: &WorkspacePaths, config: &BrokConfig) -> Option<PathBuf> {
     let obsidian = &config.memory.obsidian;
     let vault = obsidian.vault.as_deref().map(str::trim).filter(|v| !v.is_empty())?;
-    if !obsidian.folder_is_valid() {
+    // A read-only vault is no memory store: nothing is saved into or forgotten from it.
+    if obsidian.read_only || !obsidian.folder_is_valid() {
         return None;
     }
     let vault = crate::links::absolute(&paths.root, vault);
@@ -404,7 +510,7 @@ pub fn load_dir(dir: &Path, scope: Scope) -> Vec<Memory> {
 /// Reads one memory file. Files without front matter are notes titled by
 /// their first heading (or file name), so hand-written notes work too.
 pub fn read(path: &Path, scope: Scope) -> Option<Memory> {
-    let id = path.file_stem()?.to_str()?.to_owned();
+    let stem = path.file_stem()?.to_str()?.to_owned();
     let text = std::fs::read_to_string(path).ok()?;
     let text = text.strip_prefix('\u{feff}').unwrap_or(&text).replace("\r\n", "\n");
     let (front, body) = match split_front_matter(&text) {
@@ -412,6 +518,11 @@ pub fn read(path: &Path, scope: Scope) -> Option<Memory> {
         None => (Front::default(), text.as_str()),
     };
     let body = body.trim().to_owned();
+    // An Obsidian note keeps its id when the user (or `names: title`) names the file otherwise.
+    let id = match front.id.filter(|id| scope == Scope::Obsidian && is_id(id)) {
+        Some(id) => id,
+        None => stem,
+    };
     let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok().map(rfc3339_at).unwrap_or_default();
     let title = if front.title.trim().is_empty() {
         body.lines()
@@ -437,6 +548,91 @@ pub fn read(path: &Path, scope: Scope) -> Option<Memory> {
     })
 }
 
+/// The memory with `id` in `dir`: by file name, and in a vault also by the id property.
+fn find_in(dir: &Path, scope: Scope, id: &str) -> Option<Memory> {
+    read(&dir.join(format!("{id}.md")), scope)
+        .filter(|m| m.id == id)
+        .or_else(|| (scope == Scope::Obsidian).then(|| load_dir(dir, scope).into_iter().find(|m| m.id == id)).flatten())
+}
+
+fn read_front(path: &Path) -> Option<Front> {
+    let text = std::fs::read_to_string(path).ok()?.replace("\r\n", "\n");
+    let (yaml, _) = split_front_matter(text.strip_prefix('\u{feff}').unwrap_or(&text))?;
+    serde_yaml_ng::from_str(yaml).ok()
+}
+
+/// A file name for `title` that every system and Obsidian accept, numbered
+/// when taken (ignoring case, as macOS and Windows do); `fallback` when
+/// nothing of the title is usable.
+fn unique_name(dir: &Path, title: &str, fallback: &str) -> String {
+    let clean: String =
+        title.chars().map(|c| if c.is_control() || r#"\/:*?"<>|#^[]"#.contains(c) { ' ' } else { c }).collect();
+    let mut base = clean.split_whitespace().collect::<Vec<_>>().join(" ");
+    base = base.chars().take(MAX_NAME_CHARS).collect::<String>().trim_matches([' ', '.']).to_owned();
+    let upper = base.split('.').next().unwrap_or_default().to_ascii_uppercase();
+    let reserved = matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (upper.len() == 4
+            && (upper.starts_with("COM") || upper.starts_with("LPT"))
+            && upper.ends_with(|c: char| c.is_ascii_digit()));
+    if base.is_empty() || reserved {
+        fallback.clone_into(&mut base);
+    }
+    let taken: BTreeSet<String> = [dir.to_path_buf(), dir.join(FORGOTTEN_DIR)]
+        .iter()
+        .filter_map(|d| std::fs::read_dir(d).ok())
+        .flatten()
+        .filter_map(std::result::Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().to_lowercase())
+        .collect();
+    let mut name = base.clone();
+    let mut n = 2;
+    while taken.contains(&format!("{}.md", name.to_lowercase())) {
+        name = format!("{base} {n}");
+        n += 1;
+    }
+    name
+}
+
+/// Wikilinks to the memories this one is about: those whose title it
+/// mentions, or that share at least two tags.
+fn related_links(others: &[Memory], id: &str, title: &str, body: &str, tags: &[String]) -> Vec<String> {
+    let text = format!("{title}\n{body}").to_lowercase();
+    others
+        .iter()
+        .filter(|other| other.id != id)
+        .filter(|other| {
+            let mentioned =
+                other.title.chars().count() >= MIN_MENTION_CHARS && text.contains(&other.title.to_lowercase());
+            mentioned || other.tags.iter().filter(|tag| tags.contains(tag)).count() >= 2
+        })
+        .filter_map(|other| {
+            let stem = other.path.file_stem()?.to_str()?;
+            let label = other.title.replace(['[', ']', '|'], " ");
+            Some(format!("[[{stem}|{}]]", label.trim()))
+        })
+        .take(MAX_RELATED)
+        .collect()
+}
+
+static FILE_MENTION: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:^|[\s`(\[])((?:[\w.-]+/)+[\w.-]+\.[A-Za-z0-9]{1,8})\b").expect("valid file pattern")
+});
+
+/// Relative file paths the text mentions (`src/auth.rs`), without repeats.
+fn mentioned_files(body: &str) -> Vec<String> {
+    let mut files: Vec<String> = Vec::new();
+    for found in FILE_MENTION.captures_iter(body) {
+        let path = found[1].to_owned();
+        if !path.starts_with("..") && !files.contains(&path) {
+            files.push(path);
+        }
+        if files.len() == MAX_FILES {
+            break;
+        }
+    }
+    files
+}
+
 fn split_front_matter(text: &str) -> Option<(&str, &str)> {
     let rest = text.strip_prefix("---\n")?;
     if let Some(body) = rest.strip_prefix("---\n") {
@@ -455,7 +651,7 @@ pub fn is_id(id: &str) -> bool {
 }
 
 /// `<date>-<slug of the title>`, numbered when taken.
-fn unique_id(dir: &Path, title: &str, now: &str) -> String {
+fn unique_id(dir: &Path, scope: Scope, title: &str, now: &str) -> String {
     let date = now.get(..10).unwrap_or("memory").replace('-', "");
     let mut slug = String::new();
     for c in title.chars().flat_map(char::to_lowercase) {
@@ -472,7 +668,15 @@ fn unique_id(dir: &Path, title: &str, now: &str) -> String {
     let base = base.trim_end_matches('-').to_owned();
     let mut id = base.clone();
     let mut n = 2;
-    while dir.join(format!("{id}.md")).exists() || dir.join(FORGOTTEN_DIR).join(format!("{id}.md")).exists() {
+    let used = |id: &str| {
+        let forgotten = dir.join(FORGOTTEN_DIR);
+        dir.join(format!("{id}.md")).exists()
+            || forgotten.join(format!("{id}.md")).exists()
+            // Notes named after their title keep the id inside.
+            || (scope == Scope::Obsidian
+                && [dir, forgotten.as_path()].iter().any(|d| load_dir(d, scope).iter().any(|m| m.id == id)))
+    };
+    while used(&id) {
         id = format!("{base}-{n}");
         n += 1;
     }
@@ -552,6 +756,8 @@ mod tests {
             shared: root.join("shared"),
             global: Some(root.join("global")),
             obsidian: None,
+            obsidian_names: ObsidianNames::Id,
+            obsidian_read_only: false,
         }
     }
 
@@ -632,6 +838,88 @@ mod tests {
         assert_eq!(note.title, "Reunião de produto");
         assert_eq!(note.tags, ["checkout", "orders", "Pedidos"]);
         assert!(note.body.contains("[[Carrinho]]") && note.body.contains("[secret]"));
+    }
+
+    fn vault_dirs(root: &Path, names: ObsidianNames) -> MemoryDirs {
+        std::fs::create_dir_all(root.join("vault")).unwrap();
+        MemoryDirs { obsidian: Some(root.join("vault/Brokspace")), obsidian_names: names, ..dirs(root) }
+    }
+
+    #[test]
+    fn title_named_notes_upsert_by_id_even_after_a_rename() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dirs = vault_dirs(tmp.path(), ObsidianNames::Title);
+        let first = dirs.save(Scope::Obsidian, note("Use Redis: sessions?", "ttl 5m")).unwrap();
+        assert_eq!(first.path.file_name().unwrap(), "Use Redis sessions.md");
+        let again = dirs.save(Scope::Obsidian, note("Use Redis: sessions?", "other")).unwrap();
+        assert_eq!(again.path.file_name().unwrap(), "Use Redis sessions 2.md");
+        assert_ne!(again.id, first.id);
+
+        // The user renames the file in Obsidian and adds a property.
+        let renamed = first.path.with_file_name("Sessões.md");
+        let text = std::fs::read_to_string(&first.path).unwrap().replacen("---\n", "---\nstatus: accepted\n", 1);
+        std::fs::remove_file(&first.path).unwrap();
+        std::fs::write(&renamed, text).unwrap();
+        assert_eq!(dirs.find(&first.id, Some(Scope::Obsidian)).unwrap().path, renamed);
+        let updated = dirs
+            .save(Scope::Obsidian, NewMemory { id: Some(first.id.clone()), ..note("Use Redis", "ttl 10m") })
+            .unwrap();
+        assert_eq!((&updated.path, &updated.id, &updated.created), (&renamed, &first.id, &first.created));
+        let text = std::fs::read_to_string(&renamed).unwrap();
+        assert!(text.contains("status: accepted") && text.contains(&format!("- {}", first.id)), "{text}");
+
+        dirs.forget(&first.id, Some(Scope::Obsidian)).unwrap();
+        assert!(!renamed.exists() && renamed.parent().unwrap().join(".forgotten/Sessões.md").exists());
+        assert!(dirs.find(&first.id, None).is_none());
+    }
+
+    #[test]
+    fn notes_link_related_memories_and_list_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dirs = vault_dirs(tmp.path(), ObsidianNames::Title);
+        dirs.save(Scope::Obsidian, note("Orders are idempotent", "per cart")).unwrap();
+        let saved = dirs
+            .save(
+                Scope::Obsidian,
+                note(
+                    "Retry policy",
+                    "Safe because orders are idempotent. See `src/retry.rs` and https://x.dev/a/b.html",
+                ),
+            )
+            .unwrap();
+        let text = std::fs::read_to_string(saved.path).unwrap();
+        assert!(text.contains("[[Orders are idempotent|Orders are idempotent]]"), "{text}");
+        assert!(text.contains("- src/retry.rs") && !text.contains("- x.dev"), "{text}");
+    }
+
+    #[test]
+    fn export_copies_memories_once_keeping_ids_dates_and_masking() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dirs = vault_dirs(tmp.path(), ObsidianNames::Title);
+        let private = dirs.save(Scope::Private, note("Use Redis", "ttl 5m")).unwrap();
+        dirs.save(Scope::Shared, note("API is versioned", "v1")).unwrap();
+        dirs.save(Scope::Private, NewMemory { kind: Kind::Session, ..note("chat", "x") }).unwrap();
+        assert_eq!(dirs.export_to_obsidian().unwrap(), Export { written: 2, unchanged: 0 });
+        assert_eq!(dirs.export_to_obsidian().unwrap(), Export { written: 0, unchanged: 2 });
+        let copy = dirs.find(&private.id, Some(Scope::Obsidian)).unwrap();
+        assert_eq!((copy.created, copy.updated, copy.title), (private.created, private.updated, "Use Redis".into()));
+    }
+
+    #[test]
+    fn names_are_safe_on_every_system() {
+        let tmp = tempfile::tempdir().unwrap();
+        for (title, expected) in [("a/b\\c [x] #y", "a b c x y"), ("CON", "id"), ("...", "id"), ("com1.notes", "id")] {
+            assert_eq!(unique_name(tmp.path(), title, "id"), expected, "{title}");
+        }
+    }
+
+    #[test]
+    fn a_read_only_vault_is_never_written() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dirs = MemoryDirs { obsidian_read_only: true, ..dirs(tmp.path()) };
+        let error = dirs.save(Scope::Obsidian, note("x", "y")).unwrap_err().to_string();
+        assert!(error.contains("read only"), "{error}");
+        assert!(dirs.export_to_obsidian().unwrap_err().to_string().contains("read only"));
     }
 
     #[test]
