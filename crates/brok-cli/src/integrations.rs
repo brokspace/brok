@@ -96,6 +96,32 @@ pub enum McpSetup {
     Manual { file: &'static str, snippet: String },
 }
 
+/// The project file that holds an agent's MCP servers, when it has one.
+fn mcp_file(root: &Path, agent: Agent) -> Option<PathBuf> {
+    match agent {
+        Agent::Agents | Agent::Codex => None,
+        Agent::Claude => Some(root.join(".mcp.json")),
+        Agent::Cursor => Some(root.join(".cursor").join("mcp.json")),
+        Agent::Vscode => Some(root.join(".vscode").join("mcp.json")),
+    }
+}
+
+/// What connecting `agents` writes into the project: skill folders and MCP
+/// files, as workspace relative paths (folders end in `/`).
+pub fn planned_files(root: &Path, agents: &[Agent], skills: bool, mcp: bool) -> Vec<String> {
+    let shown = |path: PathBuf| brok_core::fsutil::to_workspace_relative(root, &path);
+    let mut files = BTreeSet::new();
+    for &agent in agents {
+        if skills && let Some(dir) = shown(agent.skills_dir(root, false)) {
+            files.insert(format!("{dir}/"));
+        }
+        if mcp && let Some(file) = mcp_file(root, agent).and_then(shown) {
+            files.insert(file);
+        }
+    }
+    files.into_iter().collect()
+}
+
 /// Registers `brok mcp` with an agent.
 pub fn configure_mcp(root: &Path, agent: Agent) -> Result<Option<McpSetup>> {
     let server = |typed: bool| {
@@ -105,17 +131,18 @@ pub fn configure_mcp(root: &Path, agent: Agent) -> Result<Option<McpSetup>> {
         }
         entry
     };
-    let written = match agent {
+    let (key, entry) = match agent {
         Agent::Agents => return Ok(None),
         Agent::Codex => {
             let snippet = "[mcp_servers.brokspace]\ncommand = \"brok\"\nargs = [\"mcp\"]".to_owned();
             return Ok(Some(McpSetup::Manual { file: "~/.codex/config.toml", snippet }));
         }
-        Agent::Claude => merge_server(&root.join(".mcp.json"), "mcpServers", server(true))?,
-        Agent::Cursor => merge_server(&root.join(".cursor").join("mcp.json"), "mcpServers", server(false))?,
-        Agent::Vscode => merge_server(&root.join(".vscode").join("mcp.json"), "servers", server(true))?,
+        Agent::Claude => ("mcpServers", server(true)),
+        Agent::Cursor => ("mcpServers", server(false)),
+        Agent::Vscode => ("servers", server(true)),
     };
-    Ok(Some(McpSetup::Written(written)))
+    let Some(file) = mcp_file(root, agent) else { return Ok(None) };
+    Ok(Some(McpSetup::Written(merge_server(&file, key, entry)?)))
 }
 
 /// Adds (or replaces) the `brokspace` entry under `key`, keeping every other
@@ -207,5 +234,25 @@ mod tests {
         assert_eq!(written.len(), 2, "cursor shares .agents/skills");
         assert!(dir.path().join(".claude/skills/tdd/SKILL.md").is_file());
         assert!(dir.path().join(".agents/skills/brok-context/agents/openai.yaml").is_file());
+    }
+
+    #[test]
+    fn the_plan_lists_exactly_what_connecting_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let agents = Agent::ALL;
+        let planned = planned_files(root, &agents, true, true);
+        assert_eq!(
+            planned,
+            [".agents/skills/", ".claude/skills/", ".cursor/mcp.json", ".mcp.json", ".vscode/mcp.json"]
+        );
+        assert!(std::fs::read_dir(root).unwrap().next().is_none(), "planning writes nothing");
+        for agent in agents {
+            configure_mcp(root, agent).unwrap();
+        }
+        for file in planned.iter().filter(|f| !f.ends_with('/')) {
+            assert!(root.join(file).is_file(), "{file}");
+        }
+        assert_eq!(planned_files(root, &[Agent::Codex], false, true), Vec::<String>::new());
     }
 }

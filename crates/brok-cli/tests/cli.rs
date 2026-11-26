@@ -406,3 +406,35 @@ fn asking_without_an_agent_fails_at_once_with_the_next_step() {
         assert!(output.stdout.is_empty(), "{command:?}");
     }
 }
+
+#[test]
+fn init_without_a_terminal_writes_no_project_files_unless_told_to() {
+    let outside = |dir: &Path| -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            // `.models` and `.config` are where these tests keep the user's files.
+            .filter(|n| ![".brokspace", ".models", ".config", "main.rs", ".vscode"].contains(&n.as_str()))
+            .collect();
+        names.sort();
+        names
+    };
+    let base = ["init", "--skip-model", "--no-agent", "--no-llm", "--no-index"];
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("main.rs"), "fn main() {}\n").unwrap();
+    std::fs::create_dir(dir.path().join(".vscode")).unwrap();
+
+    let silent = brok(dir.path(), &base);
+    assert!(silent.status.success(), "{}", String::from_utf8_lossy(&silent.stderr));
+    assert_eq!(outside(dir.path()), Vec::<String>::new());
+    assert!(!dir.path().join(".vscode/mcp.json").exists());
+
+    let plan = json(&brok(dir.path(), &["setup", "agents", "--dry-run", "--json"]));
+    let planned: Vec<&str> = plan["files"].as_array().unwrap().iter().map(|f| f.as_str().unwrap()).collect();
+    assert!(planned.contains(&".vscode/mcp.json") && planned.contains(&".agents/skills/"), "{planned:?}");
+    assert!(!dir.path().join(".vscode/mcp.json").exists(), "a plan writes nothing");
+
+    let agreed = brok(dir.path(), &[&base[..], &["--yes"]].concat());
+    assert!(agreed.status.success());
+    assert!(dir.path().join(".vscode/mcp.json").is_file() && dir.path().join(".agents/skills").is_dir());
+}
