@@ -50,11 +50,7 @@ pub struct CommitArgs {
 
 pub async fn review(cwd: &Path, args: ReviewArgs) -> Result<()> {
     let workspace = super::workspace(cwd)?;
-    let (diff_args, what): (Vec<String>, String) = match &args.base {
-        Some(base) => (vec!["diff".into(), format!("{base}...HEAD")], format!("this branch against {base}")),
-        None if args.staged => (vec!["diff".into(), "--cached".into()], "the staged changes".into()),
-        None => (vec!["diff".into(), "HEAD".into()], "the uncommitted changes".into()),
-    };
+    let (diff_args, what) = review_target(cwd, args.base.as_deref(), args.staged)?;
     let diff = git(cwd, &diff_args)?;
     if diff.trim().is_empty() {
         let message = format!("Nothing to review: {what} are empty.");
@@ -79,6 +75,34 @@ pub async fn review(cwd: &Path, args: ReviewArgs) -> Result<()> {
         history: Vec::new(),
     };
     ask::answer(&client, &request, Output::text_or_json(args.json)).await.map(drop)
+}
+
+/// The `git diff` to review and how to call it, or what to do first when
+/// there is nothing git can compare.
+fn review_target(cwd: &Path, base: Option<&str>, staged: bool) -> Result<(Vec<String>, String)> {
+    let succeeds = |args: &[&str]| git(cwd, &args.iter().map(|a| (*a).to_owned()).collect::<Vec<_>>());
+    if succeeds(&["rev-parse", "--is-inside-work-tree"]).is_err() {
+        bail!(
+            "`brok review` reviews git changes, and this folder is not in a git repository (start one with `git init`)"
+        );
+    }
+    let has_commits = succeeds(&["rev-parse", "--quiet", "--verify", "HEAD"]).is_ok();
+    let cached = || vec!["diff".into(), "--cached".into()];
+    Ok(match base {
+        Some(base) if has_commits => {
+            (vec!["diff".into(), format!("{base}...HEAD")], format!("this branch against {base}"))
+        }
+        _ if has_commits && !staged => (vec!["diff".into(), "HEAD".into()], "the uncommitted changes".into()),
+        _ if has_commits => (cached(), "the staged changes".into()),
+        // Before the first commit only what is staged can be shown as a change.
+        None if succeeds(&["diff", "--cached", "--name-only"])?.trim().is_empty() => {
+            bail!("this repository has no commits yet: `git add` the files to review, then run `brok review` again")
+        }
+        None => (cached(), "the staged files of a repository without commits".into()),
+        Some(base) => bail!(
+            "this repository has no commits yet, so there is nothing to compare with {base}: run `brok review` after `git add`"
+        ),
+    })
 }
 
 pub async fn commit(cwd: &Path, args: CommitArgs) -> Result<()> {
@@ -206,6 +230,30 @@ fn tempfile_path(workspace: &Workspace) -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn review_explains_repositories_without_commits() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = |base, staged| format!("{:#}", review_target(dir.path(), base, staged).unwrap_err());
+        // A temporary directory is not inside a repository.
+        assert!(error(None, false).contains("not in a git repository"), "{}", error(None, false));
+        let run = |args: &[&str]| brok_core::git::run(dir.path(), args).unwrap();
+        run(&["init", "-q"]);
+        std::fs::write(dir.path().join("a.rs"), "fn a() {}\n").unwrap();
+        assert!(error(None, false).contains("no commits yet: `git add`"));
+        assert!(error(None, true).contains("no commits yet"));
+        run(&["add", "a.rs"]);
+        assert!(error(Some("main"), false).contains("nothing to compare with main"));
+        for staged in [false, true] {
+            let (args, what) = review_target(dir.path(), None, staged).unwrap();
+            assert!(what.contains("without commits"), "{what}");
+            assert!(git(dir.path(), &args).unwrap().contains("+fn a() {}"));
+        }
+        run(&["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "first"]);
+        assert_eq!(review_target(dir.path(), None, false).unwrap().1, "the uncommitted changes");
+        assert_eq!(review_target(dir.path(), None, true).unwrap().1, "the staged changes");
+        assert_eq!(review_target(dir.path(), Some("HEAD"), false).unwrap().1, "this branch against HEAD");
+    }
 
     #[test]
     fn cleans_model_noise() {
