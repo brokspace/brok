@@ -49,7 +49,7 @@ Each `links.<name>` entry:
 | `variant` | `quantized` | `quantized` (~140 MB, int8) or `full` (~550 MB, fp32). |
 | `dimensions` | `768` | Matryoshka truncation: `64`, `128`, `256`, `512` or `768`. |
 | `device` | `auto` | `auto`, `cpu`, `cuda`, `coreml`, `directml` (GPU devices need the matching build feature). |
-| `batch_size` | `16` | Texts per inference batch. |
+| `batch_size` | `1` | Texts per inference batch. Memory grows steeply with it and a CPU gains no speed ([measurements](benchmarks.md#embedding-batch-size)); GPU builds may want more. |
 
 Model files are downloaded once per user and shared by every workspace:
 `~/.cache/brokspace/models` (Linux), `~/Library/Caches/brokspace/models`

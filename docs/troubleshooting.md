@@ -107,3 +107,14 @@ The command only reads. Check a path before removing it, with brok stopped. To r
 scratch, use `brok index --rebuild`. Old versions kept inside a LanceDB store are not reported as
 left over.
 
+## Indexing uses gigabytes of memory
+
+With semantic search, memory grows steeply with `embeddings.batch_size`. Workspaces created by brok
+0.9 or earlier have `batch_size: 16` written in `brok.yml`, which can take more than 3 GB. Lower it
+and restart brok (the index does not need rebuilding):
+
+```sh
+brok config set embeddings.batch_size 1
+brok restart
+```
+
