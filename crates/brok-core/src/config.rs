@@ -182,6 +182,20 @@ pub struct ObsidianConfig {
     /// Folders or notes of the vault never searched in `vault` mode, relative
     /// to the vault (`Private`, `Journal/2024`, `*.excalidraw.md`).
     pub exclude: Vec<String>,
+    /// How brok names the files of the notes it creates in `folder`.
+    pub names: ObsidianNames,
+}
+
+/// How `memory.obsidian.names` names new notes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ObsidianNames {
+    /// `20261122-use-redis.md`: the memory id.
+    #[default]
+    Id,
+    /// `Use Redis.md`: the title, readable in Obsidian's graph and links.
+    /// The id is kept in the note's properties.
+    Title,
 }
 
 /// What `memory.obsidian.search` covers.
@@ -197,7 +211,13 @@ pub enum ObsidianSearch {
 
 impl Default for ObsidianConfig {
     fn default() -> Self {
-        Self { vault: None, folder: "Brokspace".into(), search: ObsidianSearch::Folder, exclude: Vec::new() }
+        Self {
+            vault: None,
+            folder: "Brokspace".into(),
+            search: ObsidianSearch::Folder,
+            exclude: Vec::new(),
+            names: ObsidianNames::Id,
+        }
     }
 }
 
@@ -1238,6 +1258,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(all.memory.obsidian.search, ObsidianSearch::Vault);
+        assert_eq!(all.memory.obsidian.names, ObsidianNames::Id, "readable names are opt-in");
         assert!(all.validate().is_ok());
         default.validate().unwrap();
         // The folder cannot escape the vault or hide from Obsidian.

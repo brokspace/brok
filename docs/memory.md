@@ -17,6 +17,7 @@ brok memory list
 brok memory search "cache"
 brok memory show <id>
 brok memory forget <id>
+brok memory export --obsidian       # copy memories into your vault (see obsidian.md)
 ```
 
 Kinds: `note` (default), `decision`, `fact`, `session` and `handoff`.

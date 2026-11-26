@@ -61,6 +61,32 @@ What brok does and does not do with the vault:
 `folder` must be a relative path inside the vault (`Brokspace`,
 `Work/Brokspace`): no `..`, no absolute path, no hidden folder.
 
+## Readable names, links and export
+
+```yaml
+memory:
+  obsidian:
+    vault: ~/Documents/Obsidian/Main
+    names: title          # id (default) or title
+```
+
+With `names: title` a new note is `Use Redis.md` instead of `20261122-use-redis.md`. Characters that a system or Obsidian refuse are removed, and a taken name gets a number. The memory keeps its id in the `id` property (and in `aliases`, so `[[20261122-use-redis]]` still resolves), so you can **rename or retitle the file** and brok keeps updating the same note. Existing notes are not renamed, and properties you add are kept when brok rewrites a note.
+
+Every note brok writes to the vault also gets, when there is something to say:
+
+| Property | Content |
+|---|---|
+| `related` | Up to 5 `[[wikilinks]]` to memories in the folder whose title the note mentions, or that share two tags. Obsidian draws them in the graph. Links are made when a note is written, toward notes that already exist. |
+| `files` | Workspace files the text mentions (`src/auth.rs`), for Dataview. |
+
+To bring the memories you already have into the vault:
+
+```sh
+brok memory export --obsidian
+```
+
+It copies the private and shared memories (not session records), keeping ids and dates, with secrets masked. Running it again only writes what changed since; a note in the vault that is newer is left alone.
+
 ## Searching the whole vault
 
 Off by default. To let search, `brok ask` and your agents read every note of the vault:
@@ -107,7 +133,7 @@ Things to know:
   Reading is the same: its notes are simply not searched until it is back.
 - **Conflicts** are resolved by your sync tool. Two devices editing the same
   note produce a conflict copy; brok treats it as one more note. brok writes
-  each memory to its own file (a new id each time), so conflicts only happen
+  each memory to its own file, so conflicts only happen
   when you edit the same note in two places.
 - **Windows and WSL**: use the Windows path in `brok.yml` when brok runs on
   Windows (`C:/Users/you/Obsidian/Main`), and `/mnt/c/Users/you/Obsidian/Main`
@@ -172,6 +198,7 @@ memory:
 | `memory.obsidian.vault` | unset (off) | The vault folder. Must exist. |
 | `memory.obsidian.folder` | `Brokspace` | Folder inside the vault for brok's notes. |
 | `memory.obsidian.search` | `folder` | `folder`: search only that folder. `vault`: search every note, read only. |
+| `memory.obsidian.names` | `id` | `id` or `title`: how new notes are named. |
 | `memory.obsidian.exclude` | `[]` | Folders, files or globs of the vault never searched in `vault` mode. |
 
 Memory must be on (`memory.enabled: true`, the default). See
@@ -180,9 +207,8 @@ for every key.
 
 ## Not yet
 
-These are not implemented; the first is the most requested next step:
+These are not implemented:
 
-- Writing notes with readable file names and wikilinks to related memories.
 - Remote vaults through an Obsidian REST API plugin, for a vault that is
   not on this machine.
 - An Obsidian plugin to browse `brok search` results from inside Obsidian.
