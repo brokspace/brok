@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Indexing no longer keeps a list of every workspace file in memory while it looks for changes (brokspace/brok#72).
+
 ### Fixed
 
 - `brok start` returns once the index service can answer, and commands that reach a daemon that is still starting wait for it, instead of timing out after 60 seconds (brokspace/brok#179).
