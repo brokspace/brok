@@ -135,15 +135,7 @@ pub async fn install(
     };
 
     let manifest = ShardManifest::load_from_dir(&src)?;
-    if let Some(requirement) = &manifest.brok {
-        let current = semver::Version::parse(BROK_VERSION)?;
-        ensure!(
-            requirement.matches(&current),
-            "{} {} requires brok {requirement}, this is brok {current}",
-            manifest.name,
-            manifest.version
-        );
-    }
+    check_compatible(&manifest)?;
 
     let existing = registry.get(&manifest.name)?;
     if let Some(existing) = &existing
@@ -223,6 +215,20 @@ pub async fn install(
     Ok(InstallOutcome { shard, replaced: existing.map(|e| e.manifest.version), method })
 }
 
+/// Fails unless this brok is one the shard says it works with (`brok` in
+/// `shard.json`; a shard that says nothing is accepted).
+pub fn check_compatible(manifest: &ShardManifest) -> Result<()> {
+    let Some(requirement) = &manifest.brok else { return Ok(()) };
+    let current = semver::Version::parse(BROK_VERSION)?;
+    ensure!(
+        requirement.matches(&current),
+        "{} {} requires brok {requirement}, this is brok {current}",
+        manifest.name,
+        manifest.version
+    );
+    Ok(())
+}
+
 /// SHA-256 over every file of a directory, in path order (skill-only shards).
 fn content_hash(dir: &Path) -> Result<String> {
     fn collect(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
@@ -247,6 +253,7 @@ fn content_hash(dir: &Path) -> Result<String> {
 /// `brok init` for the bundled system agent).
 pub fn install_builtin(registry: &Registry, manifest: ShardManifest, binary: &Path) -> Result<InstalledShard> {
     manifest.validate()?;
+    check_compatible(&manifest).context("run `brok upgrade`, which installs versions that work together")?;
     let staging = Staging(registry.staging_dir().join(staging_id()));
     let prepared = staging.0.join("install");
     let executable = manifest.entrypoint_path(&prepared).context("a builtin shard must have an entrypoint")?;
