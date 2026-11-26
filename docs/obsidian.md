@@ -51,14 +51,38 @@ What brok does and does not do with the vault:
 
 | | |
 |---|---|
-| Reads and writes | Only `<vault>/<folder>/` (default `Brokspace/`). Notes you add or edit there by hand are searchable too. |
-| Never touches | The rest of your vault, and `.obsidian/` (your settings and plugins). |
+| Writes | Only `<vault>/<folder>/` (default `Brokspace/`). |
+| Reads | That folder; the whole vault only with `memory.obsidian.search: vault` (see [searching the whole vault](#searching-the-whole-vault)). Notes you add or edit by hand are searchable too. |
+| Never touches | The rest of your vault (read only at most), and `.obsidian/` (your settings and plugins, never read). |
 | Never creates | The vault itself. If `vault` does not exist, brok stops with an error instead of creating a lookalike folder (see [cloud vaults](#cloud-vaults)). |
 | Forgetting | `brok memory forget` moves the note to `Brokspace/.forgotten/`, which Obsidian hides. Nothing is deleted. |
 | Secrets | API keys, tokens, private keys and passwords are replaced with `[secret]` before a note is written, like every other scope. This matters more here: a vault is often synced to a cloud service. |
 
 `folder` must be a relative path inside the vault (`Brokspace`,
 `Work/Brokspace`): no `..`, no absolute path, no hidden folder.
+
+## Searching the whole vault
+
+Off by default. To let search, `brok ask` and your agents read every note of the vault:
+
+```sh
+brok config set memory.obsidian.search vault
+```
+
+```yaml
+memory:
+  obsidian:
+    vault: ~/Documents/Obsidian/Main
+    search: vault                    # folder (default) or vault
+    exclude: [Private, "Journal/2024"]
+```
+
+- **Read only.** brok writes nowhere but `folder`. `memory list` and `memory forget` keep working on memories, not on your other notes.
+- **Skipped:** hidden folders (`.obsidian/`, `.trash/`), everything in `exclude` (folders, files or globs such as `*.excalidraw.md`, relative to the vault), symbolic links, files that are not Markdown and notes larger than `index.max_file_kb`.
+- **Found by:** the file name (spaces and accents included), the text, the `tags` and `aliases` properties, inline `#tags` and `[[wikilinks]]`. Results show the note's full path, so you can open it.
+- **Secrets** in notes are replaced with `[secret]` in results, which may be sent to your LLM. Still, exclude folders that you do not want an LLM to see.
+- **Size budget:** up to 20,000 notes or 64 MB of text, 8,000 characters per note; brok logs a warning when a vault is larger. A generated vault of 10,000 notes (40 MB) answered `brok memory search` in under a second using about 50 MB of memory on a laptop.
+- Vault notes are ranked together with your memories.
 
 ## Cloud vaults
 
@@ -147,6 +171,8 @@ memory:
 |---|---|---|
 | `memory.obsidian.vault` | unset (off) | The vault folder. Must exist. |
 | `memory.obsidian.folder` | `Brokspace` | Folder inside the vault for brok's notes. |
+| `memory.obsidian.search` | `folder` | `folder`: search only that folder. `vault`: search every note, read only. |
+| `memory.obsidian.exclude` | `[]` | Folders, files or globs of the vault never searched in `vault` mode. |
 
 Memory must be on (`memory.enabled: true`, the default). See
 [memory.md](memory.md) for the other scopes and [configuration.md](configuration.md)
@@ -154,9 +180,8 @@ for every key.
 
 ## Not yet
 
-These are not implemented; the first two are the most requested next steps:
+These are not implemented; the first is the most requested next step:
 
-- Searching the **whole vault** (read only), not only the `Brokspace/` folder.
 - Writing notes with readable file names and wikilinks to related memories.
 - Remote vaults through an Obsidian REST API plugin, for a vault that is
   not on this machine.

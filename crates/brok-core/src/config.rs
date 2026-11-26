@@ -176,11 +176,28 @@ pub struct ObsidianConfig {
     pub vault: Option<String>,
     /// Folder inside the vault where brok reads and writes memories.
     pub folder: String,
+    /// What search reads: only `folder`, or every note of the vault
+    /// (read only; brok still writes nowhere but `folder`).
+    pub search: ObsidianSearch,
+    /// Folders or notes of the vault never searched in `vault` mode, relative
+    /// to the vault (`Private`, `Journal/2024`, `*.excalidraw.md`).
+    pub exclude: Vec<String>,
+}
+
+/// What `memory.obsidian.search` covers.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ObsidianSearch {
+    /// Only the notes in `folder`.
+    #[default]
+    Folder,
+    /// Every Markdown note of the vault, read only.
+    Vault,
 }
 
 impl Default for ObsidianConfig {
     fn default() -> Self {
-        Self { vault: None, folder: "Brokspace".into() }
+        Self { vault: None, folder: "Brokspace".into(), search: ObsidianSearch::Folder, exclude: Vec::new() }
     }
 }
 
@@ -537,6 +554,16 @@ impl BrokConfig {
         if let Some(vault) = &self.memory.obsidian.vault {
             if vault.trim().is_empty() {
                 errors.push("memory.obsidian.vault must not be empty (remove it to turn the vault off)".into());
+            }
+            if self
+                .memory
+                .obsidian
+                .exclude
+                .iter()
+                .any(|e| e.trim().is_empty() || e.contains("..") || e.starts_with(['/', '\\']))
+            {
+                errors
+                    .push("memory.obsidian.exclude entries must be relative to the vault (no `..`, not empty)".into());
             }
             if !self.memory.obsidian.folder_is_valid() {
                 errors.push(
@@ -1205,6 +1232,13 @@ mod tests {
         let default = BrokConfig::default();
         assert!(default.memory.obsidian.vault.is_none());
         assert_eq!(default.memory.obsidian.folder, "Brokspace");
+        assert_eq!(default.memory.obsidian.search, ObsidianSearch::Folder, "whole-vault search is opt-in");
+        let all: BrokConfig = serde_yaml_ng::from_str(
+            "memory:\n  obsidian:\n    vault: ~/Vault\n    search: vault\n    exclude: [Private]\n",
+        )
+        .unwrap();
+        assert_eq!(all.memory.obsidian.search, ObsidianSearch::Vault);
+        assert!(all.validate().is_ok());
         default.validate().unwrap();
         // The folder cannot escape the vault or hide from Obsidian.
         for bad in ["../outside", "/etc", "C:\\x", ".hidden", "a//b", ""] {
