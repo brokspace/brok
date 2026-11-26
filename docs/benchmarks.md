@@ -174,3 +174,29 @@ Result lists differ between batch sizes (about 85% top 10 overlap), because the 
 scales its numbers per batch; the same batch size gave the same results twice. Queries are always
 embedded one at a time.
 
+## Vector index
+
+LanceDB store, `float16` vectors, 32 results, 50 queries, one Linux x86_64 machine. Real embeddings
+mixed with noise to reach each size. Recall is against a full scan. "Re-ranked" means ten times the
+wanted results are compared again with the stored vectors, which is what brok does.
+
+| chunks | search | p50 ms | p95 ms | recall@32 | worst query |
+|---:|---|---:|---:|---:|---:|
+| 20 000 | full scan | 18.5 | 24.4 | 100% | 100% |
+| 20 000 | index | 2.2 | 2.3 | 66.8% | 50% |
+| 20 000 | index, re-ranked | 5.0 | 5.5 | 99.1% | 94% |
+| 100 000 | full scan | 75.0 | 82.7 | 100% | 100% |
+| 100 000 | index | 6.7 | 9.0 | 75.8% | 6% |
+| 100 000 | index, re-ranked | 8.9 | 11.2 | 98.9% | 88% |
+| 400 000 | full scan | 236.9 | 271.1 | 100% | 100% |
+| 400 000 | index | 8.7 | 19.9 | 62.5% | 22% |
+| 400 000 | index, re-ranked | 11.6 | 24.5 | 99.6% | 94% |
+
+The index took 1, 6 and 22 MB and 4, 14 and 20 seconds to build. Probing more partitions changed
+little (99.3% instead of 98.9% at 100 000), and re-ranking thirty times the results reached 99.8% to
+100% at about 1.5 to 3 times the latency.
+
+```sh
+BROK_BENCH_VECTORS=vectors.f32 cargo test --release -p brok-index measure_index -- --ignored --nocapture
+```
+
