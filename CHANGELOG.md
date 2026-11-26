@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-26
+
 ### Added
 
 - `memory.obsidian.search: vault` searches every Markdown note of your Obsidian vault, read only, alongside your memories: hidden folders and `memory.obsidian.exclude` are skipped, `tags` and `aliases` are searchable, secrets are masked in results, and a size budget keeps large vaults within bounds. Off by default; brok still writes only to the memory folder (brokspace/brok#102).
