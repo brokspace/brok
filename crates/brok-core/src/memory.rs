@@ -304,6 +304,13 @@ impl MemoryDirs {
     /// `save`, optionally keeping the creation and update times of a copied memory.
     fn write(&self, scope: Scope, new: NewMemory, stamps: Option<(String, String)>) -> Result<Memory> {
         let dir = self.dir(scope)?;
+        // Before anything private is written: workspaces from older versions
+        // did not keep it out of git.
+        if scope == Scope::Private
+            && let Some(state) = self.private.parent()
+        {
+            crate::init::protect_private_files(state)?;
+        }
         let title = mask_secrets(new.title.trim());
         if title.is_empty() {
             return Err(CoreError::Config("a memory needs a title".into()));
