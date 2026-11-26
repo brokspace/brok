@@ -77,6 +77,8 @@ enum Command {
     Workspace(cmd::workspace::Command),
     /// Local metrics: how searches, answers and indexing perform, and what failed.
     Stats(cmd::stats::Args),
+    /// Disk used by this workspace, per kind of data, and what is left over (read only).
+    Storage(cmd::storage::Args),
     /// Report a bug: gathers diagnostics (secrets masked), lets you review them, opens a prefilled issue.
     Bug(cmd::bug::Args),
     /// Check the installation and explain how to fix what is missing.
@@ -179,6 +181,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Link(command) => cmd::link::run(&cwd, command).await,
         Command::Workspace(command) => cmd::workspace::run(&cwd, command).await,
         Command::Stats(args) => cmd::stats::run(&cwd, args).await,
+        Command::Storage(args) => cmd::storage::run(&cwd, args).await,
         Command::Bug(args) => cmd::bug::run(&cwd, args).await,
         Command::Doctor(args) => cmd::doctor::run(&cwd, args).await,
         Command::Upgrade(args) => cmd::upgrade::run(&cwd, args).await,
@@ -220,6 +223,7 @@ fn command_name(command: &Command) -> &'static str {
         Command::Link(_) => "link",
         Command::Workspace(_) => "workspace",
         Command::Stats(_) => "stats",
+        Command::Storage(_) => "storage",
         Command::Bug(_) => "bug",
         Command::Doctor(_) => "doctor",
         Command::Upgrade(_) => "upgrade",

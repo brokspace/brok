@@ -120,6 +120,7 @@ your workspaces, so `brok init` in the next project takes seconds.
 | `brok start` / `stop` / `restart` / `logs -f` | The background daemon (bus, live indexing, agent) |
 | `brok status` / `brok doctor` | What is indexed and running / health check with fixes |
 | `brok stats [--days N]` | Local metrics: search and answer latency, indexing, recent errors |
+| `brok storage [--json]` | Disk used per kind of data and partition, and what is left over (read only) |
 | `brok bug` | A bug report with diagnostics (secrets masked) and a prefilled issue |
 | `brok upgrade [--check]` | Upgrade brok and brok-agent to the latest release, with what changed |
 | `brok index [--rebuild]` | Re-index (incremental; the daemon does it automatically) |

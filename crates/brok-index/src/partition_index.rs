@@ -20,7 +20,7 @@ use crate::bm25::Bm25Index;
 use crate::store::{ChunkStore, resolve_backend};
 
 pub(crate) const MANIFEST_FILE: &str = "files.json";
-const BM25_FILE: &str = "bm25.bin";
+pub(crate) const BM25_FILE: &str = "bm25.bin";
 const MANIFEST_VERSION: u32 = 1;
 
 /// Embedding settings an index was built with.

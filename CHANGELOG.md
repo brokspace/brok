@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `brok storage [--json]` reports the disk a workspace uses per kind of data and per partition, the shared model cache, and leftovers (indexes of removed repositories, replaced chunk store generations, old temporary files). It deletes nothing (brokspace/brok#74).
+
 ### Changed
 
 - Faster text search for common words: only the results that are returned get sorted, with the same ranking and scores (brokspace/brok#162).

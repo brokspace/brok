@@ -30,7 +30,7 @@ use arrow_ipc::writer::FileWriter;
 use crate::chunk::Chunk;
 use crate::schema::{ChunkColumns, chunk_schema, schema_dims, to_record_batch};
 
-const CURRENT: &str = "CURRENT";
+pub(crate) const CURRENT: &str = "CURRENT";
 /// Batches are coalesced on commit once there are more than this many.
 const MAX_BATCHES: usize = 8;
 

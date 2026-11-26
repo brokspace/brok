@@ -22,6 +22,7 @@ pub mod partition_index;
 pub mod schema;
 mod search;
 pub mod service;
+pub mod storage;
 pub mod store;
 mod vault;
 
