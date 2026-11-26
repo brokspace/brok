@@ -114,7 +114,10 @@ impl MemorySearch {
             let config = workspace.config();
             // Notes of the memory folder are already loaded as memories.
             let mut exclude = config.memory.obsidian.exclude.clone();
-            exclude.push(config.memory.obsidian.folder.clone());
+            // In a read-only vault there is no memory folder, so every note is read.
+            if !config.memory.obsidian.read_only {
+                exclude.push(config.memory.obsidian.folder.clone());
+            }
             Vault::new(root, exclude, config.index.max_file_kb * 1024)
         });
         Self { folders, vault, links: link_entries, loaded: Mutex::new(None) }

@@ -225,6 +225,8 @@ pub struct MemoryDirs {
     pub obsidian: Option<PathBuf>,
     /// How new notes in the vault are named (`memory.obsidian.names`).
     pub obsidian_names: ObsidianNames,
+    /// The vault is configured as read only, so the `obsidian` scope cannot be written.
+    pub obsidian_read_only: bool,
 }
 
 impl MemoryDirs {
@@ -236,6 +238,7 @@ impl MemoryDirs {
             global: config.memory.global.then(global_dir).flatten(),
             obsidian: obsidian_dir(paths, config),
             obsidian_names: config.memory.obsidian.names,
+            obsidian_read_only: config.memory.obsidian.read_only,
         }
     }
 
@@ -247,6 +250,10 @@ impl MemoryDirs {
             Scope::Global => self.global.as_deref().ok_or_else(|| {
                 CoreError::Config("global memories are off (memory.global) or the config directory is unknown".into())
             }),
+            Scope::Obsidian if self.obsidian_read_only => Err(CoreError::Config(
+                "the Obsidian vault is read only (memory.obsidian.read_only): save to another scope, or write in Obsidian"
+                    .into(),
+            )),
             Scope::Obsidian => self.obsidian.as_deref().ok_or_else(|| {
                 CoreError::Config(
                     "no Obsidian vault: set memory.obsidian.vault in brok.yml to an existing vault folder \
@@ -413,7 +420,8 @@ impl MemoryDirs {
 pub fn obsidian_dir(paths: &WorkspacePaths, config: &BrokConfig) -> Option<PathBuf> {
     let obsidian = &config.memory.obsidian;
     let vault = obsidian.vault.as_deref().map(str::trim).filter(|v| !v.is_empty())?;
-    if !obsidian.folder_is_valid() {
+    // A read-only vault is no memory store: nothing is saved into or forgotten from it.
+    if obsidian.read_only || !obsidian.folder_is_valid() {
         return None;
     }
     let vault = crate::links::absolute(&paths.root, vault);
@@ -749,6 +757,7 @@ mod tests {
             global: Some(root.join("global")),
             obsidian: None,
             obsidian_names: ObsidianNames::Id,
+            obsidian_read_only: false,
         }
     }
 
@@ -902,6 +911,15 @@ mod tests {
         for (title, expected) in [("a/b\\c [x] #y", "a b c x y"), ("CON", "id"), ("...", "id"), ("com1.notes", "id")] {
             assert_eq!(unique_name(tmp.path(), title, "id"), expected, "{title}");
         }
+    }
+
+    #[test]
+    fn a_read_only_vault_is_never_written() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dirs = MemoryDirs { obsidian_read_only: true, ..dirs(tmp.path()) };
+        let error = dirs.save(Scope::Obsidian, note("x", "y")).unwrap_err().to_string();
+        assert!(error.contains("read only"), "{error}");
+        assert!(dirs.export_to_obsidian().unwrap_err().to_string().contains("read only"));
     }
 
     #[test]

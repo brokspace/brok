@@ -81,6 +81,7 @@ memory:
   #   search: folder          # or vault: also search every note, read only
   #   exclude: [Private]
   #   names: id               # or title: `Use Redis.md` instead of the memory id
+  #   read_only: false        # true: never write (a mirrored remote vault)
 
 metrics:
   # Timings and counts of searches, answers, indexing and errors, kept on
