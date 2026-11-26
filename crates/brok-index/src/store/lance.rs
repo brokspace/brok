@@ -8,7 +8,8 @@ use arrow_array::cast::AsArray;
 use arrow_array::types::Float32Type;
 use futures::TryStreamExt;
 use lancedb::index::Index;
-use lancedb::query::{ExecutableQuery, QueryBase, Select};
+use lancedb::index::vector::IvfPqIndexBuilder;
+use lancedb::query::{ExecutableQuery, QueryBase, Select, VectorQuery};
 use lancedb::table::OptimizeAction;
 use lancedb::{DistanceType, Table};
 
@@ -21,6 +22,12 @@ use crate::schema::{
 const TABLE: &str = "chunks";
 /// Rows from which an ANN index pays off over brute force.
 const ANN_THRESHOLD: usize = 10_000;
+/// Metric of both the ANN index and the queries: LanceDB ignores an index
+/// built with another one and scans every row.
+const METRIC: DistanceType = DistanceType::Cosine;
+/// The index compares compressed vectors, so this many times the wanted
+/// results are re-ranked with the stored ones (docs/benchmarks.md).
+const REFINE: u32 = 10;
 /// Fragments written before compaction runs.
 const COMPACT_EVERY: usize = 16;
 /// Filter list size per SQL statement.
@@ -85,14 +92,36 @@ impl LanceStore {
             self.table.optimize(OptimizeAction::All).await?;
             self.writes_since_optimize = 0;
         }
-        if self.dims.is_some() && self.count().await? >= ANN_THRESHOLD {
-            let indexed = self.table.list_indices().await?.iter().any(|i| i.columns.iter().any(|c| c == VECTOR_COLUMN));
-            if !indexed {
-                tracing::info!("building ANN vector index");
-                self.table.create_index(&[VECTOR_COLUMN], Index::Auto).execute().await?;
-            }
+        if self.dims.is_some() && self.count().await? >= ANN_THRESHOLD && !self.has_usable_index().await? {
+            tracing::info!("building ANN vector index");
+            // Replaces an index brok 0.11 and earlier built with another metric.
+            let index = Index::IvfPq(IvfPqIndexBuilder::default().distance_type(METRIC));
+            self.table.create_index(&[VECTOR_COLUMN], index).execute().await?;
         }
         Ok(())
+    }
+
+    /// Whether the vectors have an index that [`Self::nearest`] queries use.
+    async fn has_usable_index(&self) -> Result<bool> {
+        for index in self.table.list_indices().await? {
+            if index.columns.iter().any(|c| c == VECTOR_COLUMN) {
+                let stats = self.table.index_stats(&index.name).await?;
+                return Ok(stats.and_then(|s| s.distance_type) == Some(METRIC));
+            }
+        }
+        Ok(false)
+    }
+
+    /// The query for the `k` chunks nearest to `query`.
+    fn nearest(&self, query: &[f32], k: usize) -> Result<VectorQuery> {
+        Ok(self
+            .table
+            .query()
+            .nearest_to(query)?
+            .distance_type(METRIC)
+            .refine_factor(REFINE)
+            .select(Select::columns(&["id", "_distance"]))
+            .limit(k))
     }
 
     pub(crate) async fn get(&self, ids: &[String]) -> Result<Vec<Chunk>> {
@@ -117,17 +146,7 @@ impl LanceStore {
         if self.count().await? == 0 {
             return Ok(Vec::new());
         }
-        let batches: Vec<RecordBatch> = self
-            .table
-            .query()
-            .nearest_to(query)?
-            .distance_type(DistanceType::Cosine)
-            .select(Select::columns(&["id", "_distance"]))
-            .limit(k)
-            .execute()
-            .await?
-            .try_collect()
-            .await?;
+        let batches: Vec<RecordBatch> = self.nearest(query, k)?.execute().await?.try_collect().await?;
         let mut hits = Vec::with_capacity(k);
         for batch in &batches {
             let ids = batch.column_by_name("id").and_then(|c| c.as_string_opt::<i32>()).context("missing id")?;
@@ -146,6 +165,10 @@ impl LanceStore {
         Ok(self.table.count_rows(None).await?)
     }
 }
+
+#[cfg(test)]
+#[path = "lance_index_benchmark.rs"]
+mod benchmark;
 
 #[cfg(test)]
 mod tests {
@@ -173,5 +196,74 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(LanceStore::open(dir.path(), Some(2)).await.unwrap().precision(), Precision::Half);
+    }
+
+    const DIMS: usize = 32;
+
+    /// Distinct, normalized and deterministic.
+    fn vector(seed: usize) -> Vec<f32> {
+        let mut state = (seed as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        let raw: Vec<f32> = (0..DIMS)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                (state % 2000) as f32 / 1000.0 - 1.0
+            })
+            .collect();
+        let norm = raw.iter().map(|v| v * v).sum::<f32>().sqrt();
+        raw.into_iter().map(|v| v / norm).collect()
+    }
+
+    async fn add(store: &mut LanceStore, ids: std::ops::Range<usize>) {
+        let chunks: Vec<_> = ids.clone().map(|i| sample(&format!("c{i}"), &format!("f{i}.rs"))).collect();
+        let vectors: Vec<_> = ids.map(vector).collect();
+        store.append(&chunks, Some(&vectors)).await.unwrap();
+        store.commit().await.unwrap();
+    }
+
+    async fn plan(store: &LanceStore) -> String {
+        store.nearest(&vector(1), 5).unwrap().explain_plan(true).await.unwrap()
+    }
+
+    async fn first(store: &LanceStore, seed: usize) -> (String, f32) {
+        store.vector_search(&vector(seed), 5).await.unwrap().remove(0)
+    }
+
+    #[tokio::test]
+    async fn searches_use_the_index_and_see_later_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = LanceStore::open(dir.path(), Some(DIMS)).await.unwrap();
+        add(&mut store, 0..ANN_THRESHOLD - 1).await;
+        assert!(!plan(&store).await.contains("ANNSubIndex"), "a small table is scanned");
+        add(&mut store, ANN_THRESHOLD - 1..ANN_THRESHOLD).await;
+        let plan_now = plan(&store).await;
+        assert!(plan_now.contains("ANNSubIndex"), "{plan_now}");
+        let (id, similarity) = first(&store, 1234).await;
+        assert_eq!(id, "c1234");
+        assert!((similarity - 1.0).abs() < 1e-3, "the similarity is exact: {similarity}");
+
+        // Rows added and removed after the index was built.
+        add(&mut store, ANN_THRESHOLD..ANN_THRESHOLD + 20).await;
+        assert_eq!(first(&store, ANN_THRESHOLD + 7).await.0, format!("c{}", ANN_THRESHOLD + 7));
+        store.delete_paths(&["f1234.rs".to_string()]).await.unwrap();
+        store.commit().await.unwrap();
+        assert!(store.vector_search(&vector(1234), 20).await.unwrap().iter().all(|(id, _)| id != "c1234"));
+    }
+
+    #[tokio::test]
+    async fn an_index_with_the_wrong_metric_is_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = LanceStore::open(dir.path(), Some(DIMS)).await.unwrap();
+        add(&mut store, 0..ANN_THRESHOLD - 1).await;
+        add(&mut store, ANN_THRESHOLD - 1..ANN_THRESHOLD).await;
+        // What brok 0.11 and earlier built.
+        let old = Index::IvfPq(IvfPqIndexBuilder::default().distance_type(DistanceType::L2));
+        store.table.create_index(&[VECTOR_COLUMN], old).execute().await.unwrap();
+        assert!(!plan(&store).await.contains("ANNSubIndex"), "ignored, as reported");
+
+        add(&mut store, ANN_THRESHOLD..ANN_THRESHOLD + 1).await;
+        assert!(plan(&store).await.contains("ANNSubIndex"));
+        assert_eq!(store.table.list_indices().await.unwrap().len(), 1);
     }
 }

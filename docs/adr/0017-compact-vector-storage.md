@@ -79,8 +79,9 @@ The chunk store shrinks by about 35% (Arrow) and 49% (LanceDB). Arrow search is 
 (older x86, some virtual machines) would be slower in the Arrow store; that was not measured.
 
 While measuring, the LanceDB vector index turned out not to be used: it is built with the L2 metric
-and searched with cosine, so LanceDB scans every row. This predates this decision and affects both
-types alike, so the LanceDB figures are exact search.
+and searched with cosine, so LanceDB scanned every row. This predated this decision and affected both
+types alike, so the LanceDB figures are exact search. Fixed afterwards (brokspace/brok#192,
+[measurements](../benchmarks.md#vector-index)).
 
 ## Limits of the evidence
 
