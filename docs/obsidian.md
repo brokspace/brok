@@ -87,6 +87,18 @@ brok memory export --obsidian
 
 It copies the private and shared memories (not session records), keeping ids and dates, with secrets masked. Running it again only writes what changed since; a note in the vault that is newer is left alone.
 
+## A read-only vault
+
+```yaml
+memory:
+  obsidian:
+    vault: .brokspace/shards-data/brok-obsidian/vault   # a copy another tool keeps
+    search: vault
+    read_only: true
+```
+
+With `read_only: true` brok reads every note and never writes: saving to the `obsidian` scope and `memory export --obsidian` are refused with an explanation. Use it for a copy that something else keeps up to date, such as the mirror of a remote vault made by the [brok-obsidian](https://github.com/brokspace/brok-obsidian) shard, where anything brok wrote would be overwritten by the next sync.
+
 ## Searching the whole vault
 
 Off by default. To let search, `brok ask` and your agents read every note of the vault:
@@ -199,6 +211,7 @@ memory:
 | `memory.obsidian.folder` | `Brokspace` | Folder inside the vault for brok's notes. |
 | `memory.obsidian.search` | `folder` | `folder`: search only that folder. `vault`: search every note, read only. |
 | `memory.obsidian.names` | `id` | `id` or `title`: how new notes are named. |
+| `memory.obsidian.read_only` | `false` | Never write into the vault (needs `search: vault`). |
 | `memory.obsidian.exclude` | `[]` | Folders, files or globs of the vault never searched in `vault` mode. |
 
 Memory must be on (`memory.enabled: true`, the default). See
