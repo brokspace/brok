@@ -153,3 +153,24 @@ What the numbers say:
 Not measured yet, on purpose: semantic search (needs the model; run with
 `--semantic` and add its baselines), LLM answers (brokspace/brok-agent#23), and
 Windows and macOS (the tool runs there, but the committed baselines are Linux).
+
+## Embedding batch size
+
+First semantic index of this repository's `crates/` and `docs/` (141 files, about 1400 chunks), brok
+0.9.0 release binary, quantized model, Linux x86_64, one run each:
+
+| `batch_size` | peak memory, 20 threads | time, 20 threads | peak memory, 4 threads | time, 4 threads |
+|---:|---:|---:|---:|---:|
+| 1 | 0.53 GB | 118 to 125 s | 0.50 GB | 165 s |
+| 2 | 0.72 GB | 133 s | | |
+| 4 | 1.1 GB | 143 to 157 s | | |
+| 8 | 1.9 GB | 160 s | | |
+| 16 | 3.1 GB | 167 to 175 s | 3.1 GB | 229 s |
+| 64 | 11 GB | 199 s | | |
+
+Search quality did not depend on it: for 15 questions with a known answer file, batch sizes 1, 4 and
+16 each found it in the top 10 for 14 and first for 9 (mean reciprocal rank 0.73, 0.72 and 0.74).
+Result lists differ between batch sizes (about 85% top 10 overlap), because the quantized model
+scales its numbers per batch; the same batch size gave the same results twice. Queries are always
+embedded one at a time.
+
