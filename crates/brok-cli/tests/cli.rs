@@ -382,3 +382,27 @@ fn a_search_right_after_start_is_answered() {
     let found = json(&brok(dir.path(), &["search", "--json", "invoice total"]));
     assert_eq!(found["hits"][0]["path"], "billing.rs", "{found}");
 }
+
+#[test]
+fn asking_without_an_agent_fails_at_once_with_the_next_step() {
+    struct Stop<'a>(&'a Path);
+    impl Drop for Stop<'_> {
+        fn drop(&mut self) {
+            let _ = brok(self.0, &["stop"]);
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    workspace_with(dir.path(), "billing.rs", "fn compute_invoice_total() {}\n");
+    let _stop = Stop(dir.path());
+    // An operator watching the bus is not someone who answers.
+    assert!(brok(dir.path(), &["start"]).status.success());
+    for command in [&["ask", "--json", "what is here?"][..], &["chat"], &["skill", "run", "tdd", "x"]] {
+        let started = std::time::Instant::now();
+        let output = brok(dir.path(), command);
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{command:?}");
+        assert!(error.contains("brok-agent is not installed"), "{command:?}: {error}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "{command:?}");
+        assert!(output.stdout.is_empty(), "{command:?}");
+    }
+}

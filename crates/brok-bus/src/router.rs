@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use brok_sdk::frame::{ErrorCode, ServerFrame};
 use brok_sdk::topic::SYSTEM_NAMESPACE;
-use brok_sdk::{Event, TopicPattern};
+use brok_sdk::{Event, Topic, TopicPattern};
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
@@ -32,6 +32,7 @@ pub(crate) enum Command {
     Subscribe { conn: ConnId, patterns: Vec<TopicPattern> },
     Publish { conn: Option<ConnId>, event: Event },
     Stats { reply: oneshot::Sender<BusStats> },
+    Subscribers { topic: Topic, reply: oneshot::Sender<Vec<String>> },
 }
 
 /// Runtime counters.
@@ -70,6 +71,12 @@ impl RouterHandle {
     pub(crate) async fn send(&self, command: Command) {
         // The router only stops when every handle is gone.
         let _ = self.tx.send(command).await;
+    }
+
+    pub(crate) async fn subscribers(&self, topic: Topic) -> Vec<String> {
+        let (reply, rx) = oneshot::channel();
+        self.send(Command::Subscribers { topic, reply }).await;
+        rx.await.unwrap_or_default()
     }
 
     pub(crate) async fn stats(&self) -> BusStats {
@@ -142,6 +149,16 @@ impl Router {
             Command::Publish { conn: None, mut event } => {
                 event.source = BUS_IDENTITY.into();
                 self.deliver(None, event);
+            }
+            Command::Subscribers { topic, reply } => {
+                let mut identities: Vec<String> = self
+                    .connections
+                    .values()
+                    .filter(|c| c.subscriptions.iter().any(|p| p.matches(&topic)))
+                    .map(|c| c.grant.identity.clone())
+                    .collect();
+                identities.sort();
+                let _ = reply.send(identities);
             }
             Command::Stats { reply } => {
                 let mut identities: Vec<String> = self.connections.values().map(|c| c.grant.identity.clone()).collect();
