@@ -123,9 +123,8 @@ async fn precision_benchmark() {
     let mut sets = vec![synthetic(10_000), synthetic(100_000)];
     if let Ok(path) = std::env::var("BROK_BENCH_VECTORS") {
         let bytes = std::fs::read(path).expect("vector file");
-        let values: Vec<f32> =
-            bytes.chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().expect("4 bytes"))).collect();
-        sets.insert(0, values.chunks_exact(DIMS).map(<[f32]>::to_vec).collect());
+        let values: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
+        sets.insert(0, values.as_chunks::<DIMS>().0.iter().map(|v| v.to_vec()).collect());
     }
     for vectors in &sets {
         measure(StoreBackend::Arrow, vectors).await;
