@@ -21,3 +21,4 @@ One file per decision, numbered, in the format described in [0000](0000-record-a
 | [0014](0014-meta-workspace-extends-linked-workspaces.md) | Meta Workspace extends linked workspaces | Accepted |
 | [0015](0015-provider-registry-and-source-control-contract.md) | Provider registry and a capability-based source-control contract | Accepted |
 | [0016](0016-remote-obsidian-vaults-by-mirroring.md) | Remote Obsidian vaults: mirror them with a shard, keep core off the network | Accepted |
+| [0017](0017-compact-vector-storage.md) | Store vectors as float16, keep 768 dimensions | Proposed |
