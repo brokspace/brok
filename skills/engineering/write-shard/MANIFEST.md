@@ -10,7 +10,7 @@ JSON has no comments, so the notes are below the example.
   "description": "Flags source files without a license header",
   "license": "MIT",
   "repository": "https://github.com/acme/license-check",
-  "brok": ">=0.1.0, <0.2.0",
+  "brok": ">=0.8.0, <1.0.0",
   "entrypoint": "bin/license-check",
   "permissions": {
     "filesystem": { "read": ["src/"], "write": [] },

@@ -147,6 +147,7 @@ your workspaces, so `brok init` in the next project takes seconds.
 | [Integrations](docs/integrations.md) | Coding agents (MCP + skills), LLMs, storage |
 | [Troubleshooting](docs/troubleshooting.md) | Doctor, logs, metrics, common problems and reporting bugs |
 | [Skills](docs/skills.md) | Built-in workflows, writing and sharing skills |
+| [Write your first shard](docs/shard-tutorial.md) | A complete shard, step by step |
 | [Shards](docs/shards.md) | Build event-driven integrations, `shard.json` reference |
 | [Configuration](docs/configuration.md) | Every `brok.yml` key |
 | [Architecture](docs/architecture.md) | How indexing, search and the bus work |
