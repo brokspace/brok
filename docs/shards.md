@@ -4,9 +4,18 @@ Shards are small programs that react to workspace events. Each one is a
 separate process connected to the `brok run` event bus, restricted to the
 topics its manifest declares.
 
-The fastest way to write one is the
+New to shards? Follow [Write your first shard](shard-tutorial.md), a complete
+example from an empty folder to a running shard. This page is the reference; the
 [brok-shard-template](https://github.com/brokspace/brok-shard-template)
-repository; this page is the reference.
+repository is the quickest starting point.
+
+## Shards made by Brokspace
+
+| Shard | What it does |
+|---|---|
+| [brok-agent](https://github.com/brokspace/brok-agent) | The default system shard: tracks changes, reviews them and answers `brok ask`. |
+| [brok-obsidian](https://github.com/brokspace/brok-obsidian) | Mirrors a remote Obsidian vault into a read-only copy you can search (not released yet). |
+| [brok-shard-template](https://github.com/brokspace/brok-shard-template) | The example to copy: reports `TODO`, `FIXME` and `HACK` markers. |
 
 ## Lifecycle
 
@@ -14,6 +23,7 @@ repository; this page is the reference.
 brok shard new my-shard                  # project from brok-shard-template
 brok shard new my-skills --skills-only   # a skill shard: shard.json + skills/
 brok shard install ./my-shard            # local directory (development)
+brok shard install ./my-shard --force    # reinstall the same version after a change
 brok shard install https://github.com/acme/brok-license-check --tag v1.0.0
 brok start                               # starts every enabled shard (or `brok restart`)
 brok bus tail 'license:*'                # watch what it publishes
@@ -56,7 +66,7 @@ shards:
   "description": "Flags risky changes in source files",
   "license": "MIT",
   "repository": "https://github.com/acme/brok-security-auditor",
-  "brok": ">=0.1.0, <0.2.0",
+  "brok": ">=0.8.0, <1.0.0",
   "entrypoint": "bin/security-auditor",
   "args": [],
   "runtime": "native",

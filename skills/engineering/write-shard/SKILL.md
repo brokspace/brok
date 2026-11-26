@@ -64,10 +64,15 @@ async fn main() -> Result<(), ClientError> {
 ## 4. Test
 
 - Unit-test the pure logic (parsing, matching) without the bus.
+- Set `brok` in `shard.json` to a range that includes the user's version.
 - Live: `brok shard install ./<name>`, then `brok run` in one terminal and
   `brok bus tail '<namespace>:*'` in another. Inject events with
   `brok bus emit file:changed '{"changed":["src/main.rs"],"deleted":[]}'`.
 - Logs: `.brokspace/logs/<name>.log`.
+
+A reply sent with `client.reply` reaches only the requester, so it does not
+show in `bus tail`. After a change, reinstall with `--force` and `brok restart`.
+The full walkthrough is `docs/shard-tutorial.md` in the brok repository.
 
 ## 5. Release
 
