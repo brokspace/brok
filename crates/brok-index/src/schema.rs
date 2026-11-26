@@ -19,16 +19,24 @@
 //! | `end_byte`   | UInt32                      | no       |
 //! | `file_hash`  | Utf8                        | no       |
 //! | `content`    | Utf8                        | no       |
-//! | `vector`     | FixedSizeList<Float32, dim> | no (only when embeddings are on) |
+//! | `vector`     | FixedSizeList<Float16, dim> | no (only when embeddings are on) |
+//!
+//! Tables created by brok 0.10 and earlier hold `Float32` vectors. A store
+//! keeps the type it was created with until it is rebuilt (ADR 0017).
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow, ensure};
 use arrow_array::cast::AsArray;
-use arrow_array::types::{Float32Type, UInt32Type};
-use arrow_array::{Array, ArrayRef, FixedSizeListArray, Float32Array, RecordBatch, StringArray, UInt32Array};
+use arrow_array::types::{Float16Type, Float32Type, UInt32Type};
+use arrow_array::{
+    Array, ArrayRef, FixedSizeListArray, Float16Array, Float32Array, RecordBatch, StringArray, UInt32Array,
+};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
+use half::f16;
+use half::slice::HalfFloatSliceExt;
 
 use crate::chunk::{Chunk, ChunkKind};
 
@@ -39,9 +47,38 @@ pub const VECTOR_COLUMN: &str = "vector";
 
 const META_VERSION: &str = "brok.schema_version";
 const META_DIMS: &str = "brok.embedding_dims";
+/// Half floats widened at a time while scoring.
+const WIDEN: usize = 64;
+
+/// The number type of stored vectors.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Precision {
+    /// `Float16`, two bytes per dimension: new indexes.
+    #[default]
+    Half,
+    /// `Float32`, four bytes per dimension: indexes from brok 0.10 and earlier.
+    Single,
+}
+
+impl Precision {
+    /// Bytes per dimension.
+    pub fn bytes(self) -> u64 {
+        match self {
+            Precision::Half => 2,
+            Precision::Single => 4,
+        }
+    }
+
+    fn data_type(self) -> DataType {
+        match self {
+            Precision::Half => DataType::Float16,
+            Precision::Single => DataType::Float32,
+        }
+    }
+}
 
 /// Builds the chunk schema, with a vector column when `dims` is set.
-pub fn chunk_schema(dims: Option<usize>) -> SchemaRef {
+pub fn chunk_schema(dims: Option<usize>, precision: Precision) -> SchemaRef {
     let utf8 = |name: &str, nullable| Field::new(name, DataType::Utf8, nullable);
     let u32_field = |name: &str| Field::new(name, DataType::UInt32, false);
     let mut fields = vec![
@@ -61,14 +98,23 @@ pub fn chunk_schema(dims: Option<usize>) -> SchemaRef {
     ];
     let mut metadata = HashMap::from([(META_VERSION.to_owned(), SCHEMA_VERSION.to_owned())]);
     if let Some(dims) = dims {
-        fields.push(Field::new(VECTOR_COLUMN, vector_type(dims), false));
+        fields.push(Field::new(VECTOR_COLUMN, vector_type(dims, precision), false));
         metadata.insert(META_DIMS.to_owned(), dims.to_string());
     }
     Arc::new(Schema::new_with_metadata(fields, metadata))
 }
 
-fn vector_type(dims: usize) -> DataType {
-    DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Float32, true)), dims as i32)
+fn vector_type(dims: usize, precision: Precision) -> DataType {
+    DataType::FixedSizeList(Arc::new(Field::new("item", precision.data_type(), true)), dims as i32)
+}
+
+/// The number type of a schema's vector column (`None` = no vector column).
+pub fn schema_precision(schema: &Schema) -> Option<Precision> {
+    match schema.field_with_name(VECTOR_COLUMN).ok()?.data_type() {
+        DataType::FixedSizeList(item, _) if *item.data_type() == DataType::Float16 => Some(Precision::Half),
+        DataType::FixedSizeList(..) => Some(Precision::Single),
+        _ => None,
+    }
 }
 
 /// Embedding dimensions declared by a schema (`None` = no vector column).
@@ -80,8 +126,13 @@ pub fn schema_dims(schema: &Schema) -> Option<usize> {
 }
 
 /// Converts chunks (and their vectors) into a record batch.
-pub fn to_record_batch(chunks: &[Chunk], vectors: Option<&[Vec<f32>]>, dims: Option<usize>) -> Result<RecordBatch> {
-    let schema = chunk_schema(dims);
+pub fn to_record_batch(
+    chunks: &[Chunk],
+    vectors: Option<&[Vec<f32>]>,
+    dims: Option<usize>,
+    precision: Precision,
+) -> Result<RecordBatch> {
+    let schema = chunk_schema(dims, precision);
     let strings = |f: fn(&Chunk) -> &str| -> ArrayRef { Arc::new(StringArray::from_iter_values(chunks.iter().map(f))) };
     let optional =
         |f: fn(&Chunk) -> Option<&str>| -> ArrayRef { Arc::new(chunks.iter().map(f).collect::<StringArray>()) };
@@ -111,12 +162,22 @@ pub fn to_record_batch(chunks: &[Chunk], vectors: Option<&[Vec<f32>]>, dims: Opt
             ensure!(vector.len() == dims, "vector has {} dimensions, expected {dims}", vector.len());
             flat.extend_from_slice(vector);
         }
-        let item = Arc::new(Field::new("item", DataType::Float32, true));
-        let list = FixedSizeListArray::try_new(item, dims as i32, Arc::new(Float32Array::from(flat)), None)?;
+        let item = Arc::new(Field::new("item", precision.data_type(), true));
+        let values: ArrayRef = match precision {
+            Precision::Half => Arc::new(Float16Array::from_iter_values(flat.into_iter().map(f16::from_f32))),
+            Precision::Single => Arc::new(Float32Array::from(flat)),
+        };
+        let list = FixedSizeListArray::try_new(item, dims as i32, values, None)?;
         columns.push(Arc::new(list));
     }
 
     Ok(RecordBatch::try_new(schema, columns)?)
+}
+
+/// A row's vector as it is stored.
+enum Stored<'a> {
+    Half(&'a [f16]),
+    Single(&'a [f32]),
 }
 
 /// Typed, zero-copy view over the columns of a chunk batch.
@@ -184,13 +245,46 @@ impl<'a> ChunkColumns<'a> {
         self.path.value(row)
     }
 
-    /// Embedding of a row, borrowed from the underlying buffer.
-    pub fn vector(&self, row: usize) -> Option<&'a [f32]> {
+    /// Embedding of a row as `f32`, borrowed when it is stored that way.
+    pub fn vector(&self, row: usize) -> Option<Cow<'a, [f32]>> {
+        match self.stored_vector(row)? {
+            Stored::Single(values) => Some(Cow::Borrowed(values)),
+            Stored::Half(values) => Some(Cow::Owned(values.iter().map(|v| v.to_f32()).collect())),
+        }
+    }
+
+    /// Dot product of a row's embedding with `query` (their cosine similarity,
+    /// both being normalized).
+    pub fn similarity(&self, row: usize, query: &[f32]) -> Option<f32> {
+        let dot = |a: &[f32], b: &[f32]| a.iter().zip(b).map(|(a, b)| a * b).sum::<f32>();
+        Some(match self.stored_vector(row)? {
+            Stored::Single(values) => dot(values, query),
+            Stored::Half(values) => {
+                // Widened a block at a time: the hardware converts slices fast.
+                let mut wide = [0f32; WIDEN];
+                values
+                    .chunks(WIDEN)
+                    .zip(query.chunks(WIDEN))
+                    .map(|(half, query)| {
+                        let wide = &mut wide[..half.len()];
+                        half.convert_to_f32_slice(wide);
+                        dot(wide, query)
+                    })
+                    .sum()
+            }
+        })
+    }
+
+    fn stored_vector(&self, row: usize) -> Option<Stored<'a>> {
         let list = self.vector?;
         let dims = list.value_length() as usize;
-        let values = list.values().as_primitive_opt::<Float32Type>()?.values();
         let start = list.value_offset(row) as usize;
-        values.get(start..start + dims)
+        let range = start..start + dims;
+        if let Some(array) = list.values().as_primitive_opt::<Float16Type>() {
+            array.values().get(range).map(Stored::Half)
+        } else {
+            list.values().as_primitive_opt::<Float32Type>()?.values().get(range).map(Stored::Single)
+        }
     }
 
     /// Materializes one row.
@@ -249,7 +343,7 @@ pub(crate) mod tests {
     #[test]
     fn roundtrip_without_vectors() {
         let chunks = vec![sample("1", "a.rs"), Chunk { symbol: None, ..sample("2", "b.rs") }];
-        let batch = to_record_batch(&chunks, None, None).unwrap();
+        let batch = to_record_batch(&chunks, None, None, Precision::default()).unwrap();
         assert_eq!(schema_dims(&batch.schema()), None);
         assert_eq!(from_record_batch(&batch).unwrap(), chunks);
     }
@@ -257,11 +351,35 @@ pub(crate) mod tests {
     #[test]
     fn roundtrip_with_vectors() {
         let chunks = vec![sample("1", "a.rs"), sample("2", "b.rs")];
-        let vectors = vec![vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0]];
-        let batch = to_record_batch(&chunks, Some(&vectors), Some(3)).unwrap();
-        assert_eq!(schema_dims(&batch.schema()), Some(3));
-        let columns = ChunkColumns::new(&batch).unwrap();
-        assert_eq!(columns.vector(1).unwrap(), &[0.0, 1.0, 0.0]);
-        assert!(to_record_batch(&chunks, Some(&vectors[..1]), Some(3)).is_err());
+        let vectors = vec![vec![1.0, 0.0, 0.0], vec![0.0, 0.6, -0.8]];
+        for precision in [Precision::Half, Precision::Single] {
+            let batch = to_record_batch(&chunks, Some(&vectors), Some(3), precision).unwrap();
+            assert_eq!(schema_dims(&batch.schema()), Some(3));
+            assert_eq!(schema_precision(&batch.schema()), Some(precision));
+            let columns = ChunkColumns::new(&batch).unwrap();
+            let stored = columns.vector(1).unwrap();
+            assert!(stored.iter().zip(&vectors[1]).all(|(a, b)| (a - b).abs() < 1e-3), "{stored:?}");
+            assert!((columns.similarity(1, &vectors[1]).unwrap() - 1.0).abs() < 1e-3);
+            assert!(to_record_batch(&chunks, Some(&vectors[..1]), Some(3), precision).is_err());
+        }
+    }
+
+    #[test]
+    fn half_vectors_score_like_single_ones_at_any_length() {
+        // Lengths around the widening block, including the real 768.
+        for dims in [1, 63, 64, 65, 768] {
+            let vector = |seed: usize| -> Vec<f32> {
+                let raw: Vec<f32> = (0..dims).map(|i| ((i * 31 + seed * 17) % 97) as f32 - 48.0).collect();
+                let norm = raw.iter().map(|v| v * v).sum::<f32>().sqrt().max(1e-12);
+                raw.into_iter().map(|v| v / norm).collect()
+            };
+            let (stored, query) = (vector(1), vector(2));
+            let score = |precision| {
+                let batch =
+                    to_record_batch(&[sample("1", "a.rs")], Some(std::slice::from_ref(&stored)), Some(dims), precision);
+                ChunkColumns::new(&batch.unwrap()).unwrap().similarity(0, &query).unwrap()
+            };
+            assert!((score(Precision::Half) - score(Precision::Single)).abs() < 1e-3, "{dims}");
+        }
     }
 }

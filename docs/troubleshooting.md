@@ -107,6 +107,9 @@ The command only reads. Check a path before removing it, with brok stopped. To r
 scratch, use `brok index --rebuild`. Old versions kept inside a LanceDB store are not reported as
 left over.
 
+Indexes created by brok 0.10 or earlier keep `float32` vectors, which take twice the space of the
+`float16` ones new indexes use. `brok index --rebuild` converts the index; it embeds every file again.
+
 ## Indexing uses gigabytes of memory
 
 With semantic search, memory grows steeply with `embeddings.batch_size`. `brok doctor` warns about it. Workspaces created by brok

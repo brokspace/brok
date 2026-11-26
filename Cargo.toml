@@ -66,6 +66,7 @@ arrow-array = "58"
 arrow-buffer = "58"
 arrow-ipc = "58"
 arrow-schema = "58"
+half = "2.7"
 # `remote` is required only because lancedb 0.40 references `Error::Http`
 # outside its feature gate (src/job.rs); drop it once fixed upstream.
 # See docs/adr/0007-lancedb-remote-feature-workaround.md.

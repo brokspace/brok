@@ -28,7 +28,7 @@ use arrow_ipc::root_as_footer;
 use arrow_ipc::writer::FileWriter;
 
 use crate::chunk::Chunk;
-use crate::schema::{ChunkColumns, chunk_schema, schema_dims, to_record_batch};
+use crate::schema::{ChunkColumns, Precision, chunk_schema, schema_dims, schema_precision, to_record_batch};
 
 pub(crate) const CURRENT: &str = "CURRENT";
 /// Batches are coalesced on commit once there are more than this many.
@@ -38,6 +38,7 @@ const MAX_BATCHES: usize = 8;
 pub struct ArrowStore {
     dir: PathBuf,
     dims: Option<usize>,
+    precision: Precision,
     generation: u64,
     batches: Vec<RecordBatch>,
     ids: HashMap<String, (usize, usize)>,
@@ -54,9 +55,11 @@ impl ArrowStore {
         let batches = if generation == 0 { Vec::new() } else { read_ipc(&generation_path(dir, generation))? };
         // Existing data keeps its own layout; `dims` only applies to new stores.
         let dims = batches.first().map_or(dims, |first| schema_dims(&first.schema()));
+        let precision = batches.first().and_then(|first| schema_precision(&first.schema())).unwrap_or_default();
         let mut store = Self {
             dir: dir.to_path_buf(),
             dims,
+            precision,
             generation,
             batches,
             ids: HashMap::new(),
@@ -71,6 +74,17 @@ impl ArrowStore {
         self.dims
     }
 
+    /// Makes an empty store write vectors of another type, as old ones did.
+    #[cfg(test)]
+    pub(crate) fn set_precision(&mut self, precision: Precision) {
+        assert!(self.batches.is_empty(), "the store already has a type");
+        self.precision = precision;
+    }
+
+    pub(crate) fn precision(&self) -> Precision {
+        self.precision
+    }
+
     pub(crate) fn count(&self) -> usize {
         self.ids.len()
     }
@@ -80,7 +94,7 @@ impl ArrowStore {
     }
 
     pub(crate) fn append(&mut self, chunks: &[Chunk], vectors: Option<&[Vec<f32>]>) -> Result<()> {
-        self.pending_appends.push(to_record_batch(chunks, vectors, self.dims)?);
+        self.pending_appends.push(to_record_batch(chunks, vectors, self.dims, self.precision)?);
         Ok(())
     }
 
@@ -101,12 +115,12 @@ impl ArrowStore {
         }
         next.append(&mut self.pending_appends);
         if next.len() > MAX_BATCHES {
-            let schema = chunk_schema(self.dims);
+            let schema = chunk_schema(self.dims, self.precision);
             next = vec![arrow_select::concat::concat_batches(&schema, &next)?];
         }
 
         let generation = self.generation + 1;
-        write_ipc(&generation_path(&self.dir, generation), &chunk_schema(self.dims), &next)?;
+        write_ipc(&generation_path(&self.dir, generation), &chunk_schema(self.dims, self.precision), &next)?;
         brok_core::fsutil::write_atomic(&self.dir.join(CURRENT), generation.to_string().as_bytes())?;
 
         // Release the old mapping before reopening, then garbage collect.
@@ -135,8 +149,7 @@ impl ArrowStore {
         for (b, batch) in self.batches.iter().enumerate() {
             let Ok(columns) = ChunkColumns::new(batch) else { continue };
             for row in 0..columns.len() {
-                if let Some(vector) = columns.vector(row) {
-                    let similarity = vector.iter().zip(query).map(|(a, b)| a * b).sum::<f32>();
+                if let Some(similarity) = columns.similarity(row, query) {
                     scored.push((similarity, b, row));
                 }
             }
@@ -264,6 +277,31 @@ mod tests {
         assert_eq!(generations, 1, "stale generations are garbage collected");
 
         assert_eq!(ArrowStore::open(dir.path(), Some(3)).unwrap().dims(), Some(2), "stored layout wins");
+    }
+
+    #[test]
+    fn a_new_store_is_half_precision_and_an_old_one_stays_single() {
+        let vectors = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        let chunks = [sample("a1", "a.rs"), sample("b1", "b.rs")];
+
+        let new = tempfile::tempdir().unwrap();
+        let mut store = ArrowStore::open(new.path(), Some(2)).unwrap();
+        store.append(&chunks, Some(&vectors)).unwrap();
+        store.commit().unwrap();
+        assert_eq!(ArrowStore::open(new.path(), Some(2)).unwrap().precision(), Precision::Half);
+
+        // An index written by an earlier brok.
+        let old = tempfile::tempdir().unwrap();
+        let batch = to_record_batch(&chunks, Some(&vectors), Some(2), Precision::Single).unwrap();
+        write_ipc(&generation_path(old.path(), 1), &batch.schema(), std::slice::from_ref(&batch)).unwrap();
+        std::fs::write(old.path().join(CURRENT), "1").unwrap();
+        let mut store = ArrowStore::open(old.path(), Some(2)).unwrap();
+        assert_eq!(store.precision(), Precision::Single);
+        store.append(&[sample("c1", "c.rs")], Some(&[vec![0.6, 0.8]])).unwrap();
+        store.commit().unwrap();
+        let reopened = ArrowStore::open(old.path(), Some(2)).unwrap();
+        assert_eq!((reopened.precision(), reopened.count()), (Precision::Single, 3));
+        assert_eq!(reopened.vector_search(&[0.6, 0.8], 1)[0].0, "c1");
     }
 
     #[test]

@@ -755,6 +755,7 @@ dependencies = [
  "bytes",
  "futures",
  "globset",
+ "half",
  "hex",
  "ignore",
  "lancedb",
