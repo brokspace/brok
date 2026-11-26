@@ -1,6 +1,6 @@
 # 0018. Index text first, then add vectors in saved batches
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-11-26
 
 ## Context

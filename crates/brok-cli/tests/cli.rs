@@ -438,3 +438,32 @@ fn init_without_a_terminal_writes_no_project_files_unless_told_to() {
     assert!(agreed.status.success());
     assert!(dir.path().join(".vscode/mcp.json").is_file() && dir.path().join(".agents/skills").is_dir());
 }
+
+#[test]
+fn the_daemon_takes_over_when_another_writer_finishes() {
+    struct Stop<'a>(&'a Path);
+    impl Drop for Stop<'_> {
+        fn drop(&mut self) {
+            let _ = brok(self.0, &["stop"]);
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    workspace_with(dir.path(), "billing.rs", "fn compute_invoice_total() {}\n");
+    // Another process is writing the index, as `brok index` does.
+    let lock = std::fs::OpenOptions::new().write(true).open(dir.path().join(".brokspace/databases/.lock")).unwrap();
+    lock.try_lock().unwrap();
+    let _stop = Stop(dir.path());
+    assert!(brok(dir.path(), &["start"]).status.success());
+    std::fs::write(dir.path().join("shipping.rs"), "fn schedule_parcel_pickup() {}\n").unwrap();
+    let finds = || {
+        let found = json(&brok(dir.path(), &["search", "--json", "schedule parcel pickup"]));
+        found["hits"].as_array().unwrap().iter().any(|h| h["path"] == "shipping.rs")
+    };
+    assert!(!finds(), "read only while the other process writes");
+    drop(lock);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !finds() {
+        assert!(std::time::Instant::now() < deadline, "the daemon did not take over");
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}

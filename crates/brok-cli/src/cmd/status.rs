@@ -70,7 +70,7 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
             p.files,
             p.chunks,
             p.backend,
-            if p.semantic { "hybrid" } else { "bm25" }
+            search_mode(&p)
         );
     }
 
@@ -149,6 +149,7 @@ async fn json_status(workspace: &Workspace) -> Result<Value> {
             json!({
                 "tier": tier(p), "path": display_path(p), "files": p.files, "chunks": p.chunks,
                 "backend": p.backend, "semantic": p.semantic,
+                "embedded": p.embedded, "waiting": p.waiting,
             })
         })
         .collect();
@@ -216,6 +217,16 @@ async fn partitions(workspace: &Workspace) -> Result<Vec<PartitionStatus>> {
     index.status().await
 }
 
+/// How the partition is searched, and how far its embedding has got.
+fn search_mode(p: &PartitionStatus) -> String {
+    let mode = if p.semantic { "hybrid" } else { "bm25" };
+    if p.waiting == 0 {
+        return mode.to_owned();
+    }
+    // Rounded down, so it never reads 100% while something waits.
+    format!("{mode}, {}% embedded ({} chunks waiting)", p.embedded * 100 / p.chunks.max(1), p.waiting)
+}
+
 fn tier(p: &PartitionStatus) -> String {
     format!("{:?}", p.tier).to_lowercase()
 }
@@ -231,5 +242,29 @@ fn shard_state(workspace: &Workspace, shard: &InstalledShard) -> &'static str {
         (true, false, _) => "skills",
         (true, true, false) => "missing-binary",
         (true, true, true) => "enabled",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_mode_shows_what_is_still_waiting() {
+        let part = |embedded, waiting, semantic| PartitionStatus {
+            id: "root".into(),
+            path: String::new(),
+            tier: brok_core::Tier::Cold,
+            backend: "arrow",
+            files: 1,
+            chunks: embedded + waiting,
+            embedded,
+            waiting,
+            semantic,
+        };
+        assert_eq!(search_mode(&part(10, 0, true)), "hybrid");
+        assert_eq!(search_mode(&part(0, 0, false)), "bm25");
+        assert_eq!(search_mode(&part(620, 880, false)), "bm25, 41% embedded (880 chunks waiting)");
+        assert_eq!(search_mode(&part(999, 1, true)), "hybrid, 99% embedded (1 chunks waiting)");
     }
 }

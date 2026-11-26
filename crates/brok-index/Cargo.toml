@@ -21,7 +21,7 @@ ast = [
   "dep:tree-sitter-typescript",
 ]
 # LanceDB chunk store with ANN vector indexes (needs protoc).
-lancedb = ["dep:lancedb"]
+lancedb = ["dep:lancedb", "dep:chrono"]
 # Local nomic-embed-text embeddings through ONNX Runtime.
 onnx = ["dep:ort", "dep:tokenizers"]
 # Hardware acceleration for the ONNX backend.
@@ -57,6 +57,7 @@ tokio-util.workspace = true
 tracing.workspace = true
 
 lancedb = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
 ort = { workspace = true, optional = true }
 tokenizers = { workspace = true, optional = true }
 tree-sitter = { workspace = true, optional = true }

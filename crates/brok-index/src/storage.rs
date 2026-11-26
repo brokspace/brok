@@ -124,6 +124,9 @@ struct Dimensions {
 struct Chunks {
     #[serde(default)]
     chunks: u64,
+    /// Waiting for a vector.
+    #[serde(default)]
+    pending: bool,
 }
 
 /// A file below some folder: its path relative to it, and its metadata.
@@ -221,7 +224,8 @@ fn measure(workspace: &Workspace, now: SystemTime) -> StorageReport {
         let chunks = manifest.as_ref().map_or(0, |m| m.files.values().map(|f| f.chunks).sum());
         let vector_bytes_estimate = manifest.as_ref().and_then(|m| {
             let precision = if m.version >= 2 { Precision::Half } else { Precision::Single };
-            m.embedding.as_ref().map(|e| chunks * e.dims * precision.bytes())
+            let embedded: u64 = m.files.values().filter(|f| !f.pending).map(|f| f.chunks).sum();
+            m.embedding.as_ref().map(|e| embedded * e.dims * precision.bytes())
         });
         let orphaned = !known.contains(&dir);
         if orphaned {
