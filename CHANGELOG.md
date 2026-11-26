@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Faster text search for common words: only the results that are returned get sorted, with the same ranking and scores (brokspace/brok#162).
+
 ## [0.9.0] - 2026-11-26
 
 ### Added
