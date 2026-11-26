@@ -1,6 +1,6 @@
 # 0016. Remote Obsidian vaults: mirror them with a shard, keep core off the network
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-11-26
 
 ## Context
@@ -61,8 +61,8 @@ Shard sandboxing is advisory ([0004](0004-advisory-filesystem-and-network-sandbo
 - Core needs one small change: the mirror folder must be usable as `memory.obsidian.vault` with writing turned off, so brok never saves memories into a copy that the next sync overwrites.
 - Tests before release: contract tests against a fake server (listing, changes, deletions, hostile names, limits, timeouts, bad certificate, wrong key), and a manual check against the real plugin, which also settles the points marked not verified.
 
-## Questions for the maintainer
+## Decided by the maintainer (2026-11-26)
 
-1. Is read-only (mirror) enough for the first version?
-2. May a new `brokspace/brok-obsidian` repository be created from the shard template?
-3. Can you test against a real vault with the plugin before it is released?
+1. Read only (mirror) is enough for the first version.
+2. The `brokspace/brok-obsidian` repository is created from the shard template.
+3. The maintainer tests against a real vault with the plugin before the first release.
