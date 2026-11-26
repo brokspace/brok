@@ -221,9 +221,12 @@ async fn check_workspace(workspace: &Workspace, report: &mut Report) {
     }
 
     match Registry::new(workspace.paths()).get(SYSTEM_AGENT) {
-        Ok(Some(agent)) if agent.is_runnable() => {
-            report.line(Status::Ok, "agent", &format!("{SYSTEM_AGENT} {}", agent.manifest.version), None)
-        }
+        Ok(Some(agent)) if agent.is_runnable() => match brok_shard::install::check_compatible(&agent.manifest) {
+            Ok(()) => report.line(Status::Ok, "agent", &format!("{SYSTEM_AGENT} {}", agent.manifest.version), None),
+            Err(e) => {
+                report.line(Status::Fail, "agent", &format!("{e:#}"), Some("brok upgrade   (then `brok restart`)"))
+            }
+        },
         Ok(Some(_)) => report.line(Status::Warn, "agent", "installed but its binary is missing", Some("brok init")),
         _ => report.line(
             Status::Warn,
