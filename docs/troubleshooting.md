@@ -121,3 +121,21 @@ brok config set embeddings.batch_size 1
 brok restart
 ```
 
+## Private files were committed
+
+brok 0.10 and earlier did not tell git to ignore `.brokspace/memory/`, `metrics/`, `members/`,
+`links/`, `shards-data/` or `reports/`, so `git add .` could commit private memories, saved chats,
+error messages, clones of other repositories, shard data and bug reports. Newer versions add the ignore
+rules the first time you run any command in the workspace. An ignore rule does not remove what git
+already tracks:
+
+1. `brok doctor` lists tracked private files (or run `git ls-files .brokspace`).
+2. Untrack them, keeping your local copies: `git rm -r --cached .brokspace/memory .brokspace/metrics`
+   (the folders `doctor` names), then commit and push.
+3. They remain in earlier commits. If any held a secret, change that secret. To remove them from
+   history as well, rewrite it with a tool such as `git filter-repo` and coordinate with everyone who
+   has a clone.
+
+To share one of these folders on purpose, add a rule such as `!/memory/` to `.brokspace/.gitignore`.
+Shared memories belong in `.brokspace-memory/`.
+

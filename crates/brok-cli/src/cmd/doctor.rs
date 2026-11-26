@@ -259,6 +259,10 @@ async fn check_workspace(workspace: &Workspace, report: &mut Report) {
         }
     }
 
+    if let Some((detail, fix)) = tracked_private_files(workspace.root()) {
+        report.line(Status::Fail, "private files", &detail, Some(&fix));
+    }
+
     for provider in brok_core::provider::ProviderRegistry::builtin().list() {
         let capabilities: Vec<&str> = provider.capabilities.iter().map(|c| c.as_str()).collect();
         let detail = if capabilities.is_empty() {
@@ -339,6 +343,39 @@ fn costly_batch(embeddings: &EmbeddingsConfig, gpu_build: bool) -> Option<(Strin
     })
 }
 
+/// Private files git already tracks (an ignore rule does not untrack them),
+/// and what to do about it. Folders the user opted in with `!` are left out.
+fn tracked_private_files(root: &Path) -> Option<(String, String)> {
+    let rules = std::fs::read_to_string(root.join(".brokspace/.gitignore")).unwrap_or_default();
+    let opted_in = |dir: &str| {
+        rules.lines().any(|l| l.trim().strip_prefix('!').is_some_and(|r| r.trim_matches('/').starts_with(dir)))
+    };
+    let paths: Vec<String> = brok_core::init::PRIVATE_DIRS
+        .iter()
+        .filter(|dir| !opted_in(dir))
+        .map(|dir| format!(".brokspace/{dir}"))
+        .collect();
+    let mut args = vec!["ls-files", "--"];
+    args.extend(paths.iter().map(String::as_str));
+    // Not a git repository: nothing can be committed.
+    let tracked = brok_core::git::run(root, &args).ok()?;
+    let files: Vec<&str> = tracked.lines().collect();
+    if files.is_empty() {
+        return None;
+    }
+    let mut folders: Vec<String> =
+        files.iter().filter_map(|f| f.split('/').nth(1)).map(|dir| format!(".brokspace/{dir}")).collect();
+    folders.sort();
+    folders.dedup();
+    Some((
+        format!("{} private files are tracked by git, for example {}", files.len(), files[0]),
+        format!(
+            "git rm -r --cached {}   (then commit; they stay in the history, so rotate any secret and see docs/troubleshooting.md)",
+            folders.join(" ")
+        ),
+    ))
+}
+
 /// Whether Windows allows paths longer than 260 characters.
 fn windows_long_paths_enabled() -> bool {
     std::process::Command::new("reg")
@@ -350,6 +387,26 @@ fn windows_long_paths_enabled() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reports_private_files_git_already_tracks() {
+        let dir = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| brok_core::git::run(dir.path(), args).unwrap();
+        git(&["init", "-q"]);
+        for file in [".brokspace/memory/a.md", ".brokspace/metrics/m.jsonl", ".brokspace/brok.yml"] {
+            let path = dir.path().join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "x").unwrap();
+        }
+        assert!(tracked_private_files(dir.path()).is_none(), "untracked files are not a problem yet");
+        git(&["add", "-f", ".brokspace"]);
+        let (detail, fix) = tracked_private_files(dir.path()).unwrap();
+        assert!(detail.starts_with("2 private files"), "{detail}");
+        assert!(fix.starts_with("git rm -r --cached .brokspace/memory .brokspace/metrics "), "{fix}");
+        std::fs::write(dir.path().join(".brokspace/.gitignore"), "!memory/\n!metrics/\n").unwrap();
+        assert!(tracked_private_files(dir.path()).is_none(), "shared on purpose");
+        assert!(tracked_private_files(&std::env::temp_dir().join("not-a-repository")).is_none());
+    }
 
     #[test]
     fn warns_about_large_batches_on_a_cpu_only() {
