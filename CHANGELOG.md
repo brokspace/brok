@@ -8,6 +8,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `brok doctor` warns when `embeddings.batch_size` is large enough to take gigabytes while indexing on a CPU, and shows how to lower it; it changes nothing itself (brokspace/brok#72).
 - `brok storage [--json]` reports the disk a workspace uses per kind of data and per partition, the shared model cache, and leftovers (indexes of removed repositories, replaced chunk store generations, old temporary files). It deletes nothing (brokspace/brok#74).
 
 ### Changed

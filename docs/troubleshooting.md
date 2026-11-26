@@ -109,7 +109,7 @@ left over.
 
 ## Indexing uses gigabytes of memory
 
-With semantic search, memory grows steeply with `embeddings.batch_size`. Workspaces created by brok
+With semantic search, memory grows steeply with `embeddings.batch_size`. `brok doctor` warns about it. Workspaces created by brok
 0.9 or earlier have `batch_size: 16` written in `brok.yml`, which can take more than 3 GB. Lower it
 and restart brok (the index does not need rebuilding):
 
