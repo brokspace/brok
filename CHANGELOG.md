@@ -8,6 +8,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Faster text search for common words: only the results that are returned get sorted, with the same ranking and scores (brokspace/brok#162).
 - Indexing no longer keeps a list of every workspace file in memory while it looks for changes (brokspace/brok#72).
 
 ### Fixed
