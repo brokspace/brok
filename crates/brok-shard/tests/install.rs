@@ -2,6 +2,7 @@
 
 use brok_core::WorkspacePaths;
 use brok_sdk::ShardManifest;
+use brok_shard::install::install_builtin;
 use brok_shard::{AutoApprove, Consent, InstallMethod, InstallOptions, InstallSource, Registry, ShardSource, install};
 
 fn make_shard(dir: &std::path::Path, version: &str, requires: Option<&str>) {
@@ -108,4 +109,23 @@ Body
     let skills = outcome.shard.skill_dirs();
     assert!(skills[0].join("release-notes/SKILL.md").is_file());
     assert_eq!(outcome.shard.lock.unwrap().binary_sha256.len(), 64);
+}
+
+#[tokio::test]
+async fn an_agent_for_another_brok_is_refused_and_the_installed_one_stays() {
+    let ws = tempfile::tempdir().unwrap();
+    let registry = Registry::new(&WorkspacePaths::new(ws.path()));
+    let binary = ws.path().join("demo-binary");
+    std::fs::write(&binary, b"#!/bin/sh\n").unwrap();
+    let manifest = |version: &str, brok: Option<&str>| {
+        let src = tempfile::tempdir().unwrap();
+        make_shard(src.path(), version, brok);
+        ShardManifest::load_from_dir(src.path()).unwrap()
+    };
+
+    install_builtin(&registry, manifest("0.1.0", None), &binary).unwrap();
+    let err = install_builtin(&registry, manifest("0.2.0", Some(">=99.0.0")), &binary).unwrap_err();
+    let text = format!("{err:#}");
+    assert!(text.contains("requires brok >=99.0.0") && text.contains("brok upgrade"), "{text}");
+    assert_eq!(registry.list().unwrap()[0].manifest.version, semver::Version::new(0, 1, 0));
 }

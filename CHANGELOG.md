@@ -12,6 +12,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `brok init` and the daemon refuse a `brok-agent` that says it needs another brok version, keeping the installed one, and `brok doctor` reports a mismatch with `brok upgrade` as the fix (brokspace/brok#46).
 - **Security:** private files under `.brokspace/` (private memories including saved chats, metrics, member and linked repository clones, shard data and bug reports) could be committed to git. New workspaces ignore them and existing ones are repaired by the next command, keeping your own rules; `brok doctor` reports files already tracked. Ignoring does not remove them from git history: see "Private files were committed" in the troubleshooting guide (brokspace/brok#195).
 - Semantic search in large workspaces (10 000 chunks or more, LanceDB store) now uses its vector index: it was built with one metric and searched with another, so every search scanned all chunks. In our measurements vector search at 100 000 chunks takes about 9 ms instead of 75, returning 98.9% of the exact results. An existing index is replaced the next time indexing changes something (brokspace/brok#192).
 
