@@ -13,6 +13,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Built on `brok-sdk` 0.3.1: events waiting to be handled are limited to 32 MiB as well as 256 events, so large events can no longer queue gigabytes (brokspace/brok-sdk#25).
 - Semantic indexing uses far less memory on a CPU: `embeddings.batch_size` now defaults to 1 (about 0.5 GB instead of 3.1 GB at peak, and faster). Existing `brok.yml` files that set 16 keep it; see the troubleshooting guide (brokspace/brok#72).
 - Faster text search for common words: only the results that are returned get sorted, with the same ranking and scores (brokspace/brok#162).
 - Indexing no longer keeps a list of every workspace file in memory while it looks for changes (brokspace/brok#72).
