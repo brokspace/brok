@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- New indexes store vectors as `float16`: about 35% (Arrow) to 49% (LanceDB) less disk for the chunk store, with the same search results in our measurements. Existing indexes keep working and are not rebuilt; `brok index --rebuild` converts one. brok 0.10 and earlier rebuild an index made this way (brokspace/brok#73, ADR 0017).
+
 ## [0.10.0] - 2026-11-26
 
 ### Added

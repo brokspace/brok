@@ -19,6 +19,7 @@ use anyhow::{Result, bail};
 use brok_core::config::StoreBackend;
 
 use crate::chunk::Chunk;
+use crate::schema::Precision;
 
 /// A chunk store, dispatched statically over the compiled backends.
 pub enum ChunkStore {
@@ -66,6 +67,15 @@ impl ChunkStore {
             Self::Arrow(store) => store.dims(),
             #[cfg(feature = "lancedb")]
             Self::Lance(store) => store.dims(),
+        }
+    }
+
+    /// The number type of the stored vectors.
+    pub fn precision(&self) -> Precision {
+        match self {
+            Self::Arrow(store) => store.precision(),
+            #[cfg(feature = "lancedb")]
+            Self::Lance(store) => store.precision(),
         }
     }
 
@@ -138,3 +148,6 @@ impl ChunkStore {
 pub(crate) fn sql_list(values: &[String]) -> String {
     values.iter().map(|v| format!("'{}'", v.replace('\'', "''"))).collect::<Vec<_>>().join(", ")
 }
+
+#[cfg(test)]
+mod precision_benchmark;

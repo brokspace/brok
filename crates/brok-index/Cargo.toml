@@ -42,6 +42,7 @@ arrow-select = "58"
 bytes.workspace = true
 futures.workspace = true
 globset.workspace = true
+half.workspace = true
 hex.workspace = true
 ignore.workspace = true
 memmap2.workspace = true
