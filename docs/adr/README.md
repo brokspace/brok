@@ -20,3 +20,4 @@ One file per decision, numbered, in the format described in [0000](0000-record-a
 | [0013](0013-open-core-and-repository-boundaries.md) | Open core and repository boundaries | Accepted |
 | [0014](0014-meta-workspace-extends-linked-workspaces.md) | Meta Workspace extends linked workspaces | Accepted |
 | [0015](0015-provider-registry-and-source-control-contract.md) | Provider registry and a capability-based source-control contract | Accepted |
+| [0016](0016-remote-obsidian-vaults-by-mirroring.md) | Remote Obsidian vaults: mirror them with a shard, keep core off the network | Proposed |
