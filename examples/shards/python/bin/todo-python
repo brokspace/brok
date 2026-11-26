@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""A Brokspace shard in Python, with the standard library only.
+
+- on `file:changed`, publishes `todo-python:todo` for each TODO or FIXME line;
+- on `todo-python:ask` {"query": ...}, searches the index and publishes
+  `todo-python:answer` with the files found.
+
+The protocol is described in docs/shards-other-languages.md.
+"""
+import json
+import os
+import socket
+import struct
+import sys
+import time
+import uuid
+
+NAME = os.environ["BROK_SHARD_NAME"]
+ROOT = os.path.realpath(os.environ["BROK_WORKSPACE"])
+MAX_FILE_BYTES = 256 * 1024
+
+
+def log(message):
+    """stdout and stderr both end up in .brokspace/logs/<name>.log."""
+    print(message, file=sys.stderr, flush=True)
+
+
+class Bus:
+    """Length prefixed JSON frames over the Unix socket `brok run` provides."""
+
+    def __init__(self, endpoint, token):
+        self.socket = socket.socket(socket.AF_UNIX)
+        self.socket.connect(endpoint)
+        self.stream = self.socket.makefile("rb")
+        self.send({"type": "hello", "protocol": 1, "name": NAME, "version": "0.1.0", "token": token})
+        self.welcome = self.receive()
+        if not self.welcome or self.welcome["type"] != "welcome":
+            raise SystemExit(f"the bus refused the connection: {self.welcome}")
+
+    def send(self, frame):
+        data = json.dumps(frame).encode()
+        self.socket.sendall(struct.pack(">I", len(data)) + data)
+
+    def receive(self):
+        """The next frame, or None when the bus closed the connection."""
+        head = self.stream.read(4)
+        if len(head) < 4:
+            return None
+        return json.loads(self.stream.read(struct.unpack(">I", head)[0]))
+
+    def subscribe(self, *patterns):
+        self.send({"type": "subscribe", "patterns": list(patterns)})
+
+    def publish(self, topic, payload):
+        event = {"id": str(uuid.uuid4()), "topic": topic, "timestamp_ms": int(time.time() * 1000), "payload": payload}
+        self.send({"type": "publish", "event": event})
+        return event["id"]
+
+
+def todos(path):
+    """(line number, text) of each marker in a workspace file."""
+    full = os.path.realpath(os.path.join(ROOT, path))
+    # Never read outside the workspace, whatever the event says.
+    if not full.startswith(ROOT + os.sep) or not os.path.isfile(full) or os.path.getsize(full) > MAX_FILE_BYTES:
+        return []
+    with open(full, encoding="utf-8", errors="replace") as file:
+        return [(n, line.strip()) for n, line in enumerate(file, 1) if "TODO" in line or "FIXME" in line]
+
+
+def main():
+    bus = Bus(os.environ["BROK_ENDPOINT"], os.environ["BROK_TOKEN"])
+    bus.subscribe("file:changed", f"{NAME}:ask")
+    log("ready")
+    searches = set()  # ids of the searches waiting for a reply
+    while (frame := bus.receive()) is not None:
+        if frame["type"] == "error":
+            log(f"bus error: {frame['message']}")
+            continue
+        event = frame["event"]
+        topic, payload = event["topic"], event.get("payload")
+        if topic == "system:shutdown":
+            break
+        if topic == "file:changed":
+            for path in payload.get("changed", []):
+                for line, text in todos(path):
+                    bus.publish(f"{NAME}:todo", {"path": path, "line": line, "text": text})
+        elif topic == f"{NAME}:ask":
+            searches.add(bus.publish("index:search", {"query": payload["query"], "limit": 5}))
+        elif event.get("correlation_id") in searches:
+            searches.remove(event["correlation_id"])
+            bus.publish(f"{NAME}:answer", {"paths": [hit["path"] for hit in payload["hits"]]})
+
+
+if __name__ == "__main__":
+    main()

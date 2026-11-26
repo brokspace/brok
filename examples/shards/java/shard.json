@@ -1,0 +1,39 @@
+{
+  "$schema": "https://raw.githubusercontent.com/brokspace/brok-sdk/main/shard.schema.json",
+  "name": "todo-java",
+  "version": "0.1.0",
+  "description": "Example shard in Java: reports TODO and FIXME lines and searches the index",
+  "license": "MIT OR Apache-2.0",
+  "brok": ">=0.8.0, <1.0.0",
+  "entrypoint": "bin/todo-java",
+  "build": {
+    "command": [
+      "sh",
+      "build.sh"
+    ],
+    "artifact": "dist/todo-java"
+  },
+  "permissions": {
+    "filesystem": {
+      "read": [
+        "."
+      ]
+    },
+    "network": false,
+    "process": [
+      "java",
+      "sh"
+    ],
+    "env": [
+      "JAVA_HOME"
+    ]
+  },
+  "subscribes_to": [
+    "file:changed",
+    "todo-java:ask"
+  ],
+  "publishes_to": [
+    "todo-java:*",
+    "index:search"
+  ]
+}
