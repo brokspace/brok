@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-26
+
 ### Added
 
 - `brok doctor` warns when `embeddings.batch_size` is large enough to take gigabytes while indexing on a CPU, and shows how to lower it; it changes nothing itself (brokspace/brok#72).
