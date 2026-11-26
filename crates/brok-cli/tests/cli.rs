@@ -365,3 +365,20 @@ fn the_index_service_widens_a_search_to_the_members() {
         assert_eq!(wide.hits[0].path, "api:billing.rs");
     });
 }
+
+#[test]
+fn a_search_right_after_start_is_answered() {
+    struct Stop<'a>(&'a Path);
+    impl Drop for Stop<'_> {
+        fn drop(&mut self) {
+            let _ = brok(self.0, &["stop"]);
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    workspace_with(dir.path(), "billing.rs", "fn compute_invoice_total() { /* invoice total */ }\n");
+    let _stop = Stop(dir.path());
+    let started = brok(dir.path(), &["start"]);
+    assert!(started.status.success(), "{}", String::from_utf8_lossy(&started.stderr));
+    let found = json(&brok(dir.path(), &["search", "--json", "invoice total"]));
+    assert_eq!(found["hits"][0]["path"], "billing.rs", "{found}");
+}

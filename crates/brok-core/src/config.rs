@@ -307,7 +307,8 @@ pub struct EmbeddingsConfig {
     pub dimensions: usize,
     /// Execution device.
     pub device: Device,
-    /// Texts per inference batch.
+    /// Texts per inference batch. On a CPU a batch costs memory without
+    /// saving time (see docs/benchmarks.md); GPU builds may want more.
     pub batch_size: usize,
 }
 
@@ -319,7 +320,7 @@ impl Default for EmbeddingsConfig {
             variant: ModelVariant::Quantized,
             dimensions: 768,
             device: Device::Auto,
-            batch_size: 16,
+            batch_size: 1,
         }
     }
 }

@@ -1,6 +1,6 @@
 //! The workspace index: every partition, plus the indexing pipeline.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -173,30 +173,10 @@ impl Index {
             }
         }
         progress(Progress::Scanning);
-        let files = {
-            let root = self.root.clone();
-            tokio::task::spawn_blocking(move || walk(&root)).await??
-        };
-        let mut report = IndexReport { files_scanned: files.len(), ..IndexReport::default() };
+        let (files_scanned, work) = self.scan().await?;
+        let mut report = IndexReport { files_scanned, ..IndexReport::default() };
 
-        let mut by_partition: HashMap<String, Vec<FileMeta>> = HashMap::new();
-        for file in files {
-            if self.filter.allows(&file.rel) {
-                by_partition.entry(self.partitions.resolve(&file.rel).id.clone()).or_default().push(file);
-            }
-        }
-
-        for i in 0..self.parts.len() {
-            let files = by_partition.remove(&self.parts[i].partition.id).unwrap_or_default();
-            let present: HashSet<&str> = files.iter().map(|f| f.rel.as_str()).collect();
-            let deleted: Vec<String> =
-                self.parts[i].files().keys().filter(|path| !present.contains(path.as_str())).cloned().collect();
-            let candidates: Vec<FileMeta> = files
-                .into_iter()
-                .filter(|f| {
-                    self.parts[i].files().get(&f.rel).is_none_or(|r| r.size != f.size || r.modified != f.modified)
-                })
-                .collect();
+        for (i, (candidates, deleted)) in work.into_iter().enumerate() {
             if candidates.is_empty() && deleted.is_empty() {
                 continue;
             }
@@ -206,6 +186,44 @@ impl Index {
         report.duration = started.elapsed();
         self.record_index("full", &report);
         Ok(report)
+    }
+
+    /// Walks the workspace and returns the number of files seen and, for each
+    /// partition, the files to (re)index and the ones that disappeared. Files
+    /// arrive in batches and unchanged ones are dropped at once, so memory
+    /// grows with what changed rather than with the size of the workspace.
+    async fn scan(&self) -> Result<(usize, Vec<PartitionWork>)> {
+        let (batches, mut walked) = tokio::sync::mpsc::channel(SCAN_BATCHES);
+        let root = self.root.clone();
+        let walker = tokio::task::spawn_blocking(move || walk(&root, &batches));
+
+        let positions: HashMap<&str, usize> =
+            self.parts.iter().enumerate().map(|(i, part)| (part.partition.id.as_str(), i)).collect();
+        // Indexed files not seen yet; whatever is left at the end was deleted.
+        let mut unseen: Vec<BTreeSet<&str>> =
+            self.parts.iter().map(|part| part.files().keys().map(String::as_str).collect()).collect();
+        let mut work: Vec<PartitionWork> = self.parts.iter().map(|_| PartitionWork::default()).collect();
+        let mut scanned = 0;
+        while let Some(batch) = walked.recv().await {
+            scanned += batch.len();
+            for file in batch {
+                if !self.filter.allows(&file.rel) {
+                    continue;
+                }
+                let Some(&i) = positions.get(self.partitions.resolve(&file.rel).id.as_str()) else { continue };
+                unseen[i].remove(file.rel.as_str());
+                let record = self.parts[i].files().get(&file.rel);
+                if record.is_none_or(|r| r.size != file.size || r.modified != file.modified) {
+                    work[i].0.push(file);
+                }
+            }
+        }
+        // A walk that failed halfway must not read as files being deleted.
+        walker.await??;
+        for (work, unseen) in work.iter_mut().zip(unseen) {
+            work.1 = unseen.into_iter().map(str::to_owned).collect();
+        }
+        Ok((scanned, work))
     }
 
     /// Applies a set of workspace relative changes (from `file:changed`).
@@ -420,6 +438,13 @@ impl FileFilter {
     }
 }
 
+/// A partition's files to (re)index, and its files that disappeared.
+type PartitionWork = (Vec<FileMeta>, Vec<String>);
+
+/// Files per batch sent by the walker, and batches that may wait.
+const SCAN_BATCH: usize = 512;
+const SCAN_BATCHES: usize = 4;
+
 #[derive(Debug, Clone)]
 struct FileMeta {
     rel: String,
@@ -445,8 +470,9 @@ impl FileMeta {
     }
 }
 
-/// Lists indexable files, honoring `.gitignore` (including nested ones).
-fn walk(root: &Path) -> Result<Vec<FileMeta>> {
+/// Sends the indexable files to `batches`, honoring `.gitignore` (including
+/// nested ones). Stops early if the receiver is gone.
+fn walk(root: &Path, batches: &tokio::sync::mpsc::Sender<Vec<FileMeta>>) -> Result<()> {
     let walker = ignore::WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(true)
@@ -466,7 +492,7 @@ fn walk(root: &Path) -> Result<Vec<FileMeta>> {
             !skip_name && !generated
         })
         .build();
-    let mut files = Vec::new();
+    let mut files = Vec::with_capacity(SCAN_BATCH);
     for entry in walker {
         let entry = match entry {
             Ok(entry) => entry,
@@ -482,8 +508,15 @@ fn walk(root: &Path) -> Result<Vec<FileMeta>> {
         if let Ok(metadata) = entry.metadata() {
             files.push(FileMeta::from_metadata(rel, entry.path().to_path_buf(), &metadata));
         }
+        if files.len() == SCAN_BATCH {
+            let batch = std::mem::replace(&mut files, Vec::with_capacity(SCAN_BATCH));
+            if batches.blocking_send(batch).is_err() {
+                return Ok(());
+            }
+        }
     }
-    Ok(files)
+    let _ = batches.blocking_send(files);
+    Ok(())
 }
 
 enum Outcome {

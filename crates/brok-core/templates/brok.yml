@@ -52,7 +52,8 @@ embeddings:
   dimensions: 768
   # auto | cpu | cuda | coreml | directml
   device: auto
-  batch_size: 16
+  # Texts embedded at once. More uses much more memory; it pays off on a GPU only.
+  batch_size: 1
 
 search:
   limit: 8

@@ -4,6 +4,7 @@ use std::path::Path;
 
 use anyhow::{Result, bail};
 use brok_core::Workspace;
+use brok_core::config::{Device, EmbeddingsConfig};
 use brok_index::{Access, Index, ModelFiles};
 use brok_shard::{Registry, SYSTEM_AGENT};
 use console::style;
@@ -172,6 +173,10 @@ async fn check_workspace(workspace: &Workspace, report: &mut Report) {
         report.line(Status::Ok, "embeddings", "disabled (text search only)", None);
     }
 
+    if let Some((detail, fix)) = costly_batch(&config.embeddings, GPU_BUILD) {
+        report.line(Status::Warn, "batch size", &detail, Some(fix));
+    }
+
     match config.llm.providers.get(&config.llm.default) {
         Some(provider) => {
             let name = &config.llm.default;
@@ -313,10 +318,51 @@ async fn check_workspace(workspace: &Workspace, report: &mut Report) {
     }
 }
 
+/// Whether this build can run the model on a GPU, where large batches pay off.
+const GPU_BUILD: bool = cfg!(any(feature = "cuda", feature = "coreml", feature = "directml"));
+
+/// Largest batch worth no warning on a CPU: about 1 GB at peak.
+const CPU_BATCH_LIMIT: usize = 4;
+
+/// What to say about a batch size that costs a CPU gigabytes for nothing
+/// (`brok.yml` files written by brok 0.9 and earlier say 16).
+fn costly_batch(embeddings: &EmbeddingsConfig, gpu_build: bool) -> Option<(String, &'static str)> {
+    let on_cpu = embeddings.device == Device::Cpu || (embeddings.device == Device::Auto && !gpu_build);
+    (embeddings.enabled && on_cpu && embeddings.batch_size > CPU_BATCH_LIMIT).then(|| {
+        (
+            format!(
+                "batch_size {} can take gigabytes while indexing on a CPU, without being faster",
+                embeddings.batch_size
+            ),
+            "brok config set embeddings.batch_size 1   (then `brok restart`)",
+        )
+    })
+}
+
 /// Whether Windows allows paths longer than 260 characters.
 fn windows_long_paths_enabled() -> bool {
     std::process::Command::new("reg")
         .args(["query", r"HKLM\SYSTEM\CurrentControlSet\Control\FileSystem", "/v", "LongPathsEnabled"])
         .output()
         .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).contains("0x1"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn warns_about_large_batches_on_a_cpu_only() {
+        let with = |batch_size, device| EmbeddingsConfig { batch_size, device, ..EmbeddingsConfig::default() };
+        let (detail, fix) = costly_batch(&with(16, Device::Auto), false).unwrap();
+        assert!(detail.contains("batch_size 16"), "{detail}");
+        assert!(fix.starts_with("brok config set embeddings.batch_size 1"));
+        assert!(costly_batch(&with(16, Device::Cpu), true).is_some());
+        assert!(costly_batch(&EmbeddingsConfig::default(), false).is_none());
+        assert!(costly_batch(&with(CPU_BATCH_LIMIT, Device::Auto), false).is_none());
+        assert!(costly_batch(&with(16, Device::Auto), true).is_none(), "a GPU build may use it");
+        assert!(costly_batch(&with(16, Device::Cuda), false).is_none());
+        let off = EmbeddingsConfig { enabled: false, ..with(16, Device::Auto) };
+        assert!(costly_batch(&off, false).is_none());
+    }
 }

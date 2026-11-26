@@ -126,8 +126,7 @@ impl Bm25Index {
 
     /// Top `k` chunk ids for `query`, best first.
     pub fn search(&self, query: &str, k: usize) -> Vec<(String, f32)> {
-        let (_, mut ranked) = self.score(query);
-        ranked.truncate(k);
+        let (_, ranked) = self.score(query, k);
         ranked.into_iter().map(|(slot, score, _)| (self.docs[slot as usize].chunk_id.clone(), score)).collect()
     }
 
@@ -136,8 +135,7 @@ impl Bm25Index {
     /// corpus): the share of the query's terms a chunk contains, times its
     /// score relative to the best one here.
     pub fn search_relevance(&self, query: &str, k: usize) -> Vec<(String, f32)> {
-        let (terms, mut ranked) = self.score(query);
-        ranked.truncate(k);
+        let (terms, ranked) = self.score(query, k);
         let top = ranked.first().map_or(1.0, |r| r.1.max(f32::EPSILON));
         ranked
             .into_iter()
@@ -148,9 +146,9 @@ impl Bm25Index {
             .collect()
     }
 
-    /// Number of distinct query terms, and every matching document as
+    /// Number of distinct query terms, and the `k` best matching documents as
     /// (slot, BM25 score, terms matched), best first.
-    fn score(&self, query: &str) -> (usize, Vec<(u32, f32, u16)>) {
+    fn score(&self, query: &str, k: usize) -> (usize, Vec<(u32, f32, u16)>) {
         let mut terms: Vec<String> = tokenize(query).collect();
         terms.sort();
         terms.dedup();
@@ -163,14 +161,19 @@ impl Bm25Index {
         let mut scores: HashMap<u32, (f32, u16)> = HashMap::new();
         for term in &terms {
             let Some(postings) = self.postings.get(term) else { continue };
-            let live_postings: Vec<&(u32, u16)> =
-                postings.iter().filter(|(slot, _)| self.docs[*slot as usize].live).collect();
-            if live_postings.is_empty() {
+            let live = |slot: &u32| self.docs[*slot as usize].live;
+            // Without tombstones every posting is live: no need to count them.
+            let df = if self.docs.len() == self.live as usize {
+                postings.len()
+            } else {
+                postings.iter().filter(|(slot, _)| live(slot)).count()
+            };
+            if df == 0 {
                 continue;
             }
-            let df = live_postings.len() as f32;
+            let df = df as f32;
             let idf = (1.0 + (n - df + 0.5) / (df + 0.5)).ln();
-            for &&(slot, tf) in &live_postings {
+            for &(slot, tf) in postings.iter().filter(|(slot, _)| live(slot)) {
                 let tf = f32::from(tf);
                 let len = self.docs[slot as usize].len as f32;
                 let score = idf * tf * (K1 + 1.0) / (tf + K1 * (1.0 - B + B * len / avg_len));
@@ -182,7 +185,7 @@ impl Bm25Index {
 
         let mut ranked: Vec<(u32, f32, u16)> =
             scores.into_iter().map(|(slot, (score, matched))| (slot, score, matched)).collect();
-        ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        keep_best(&mut ranked, k);
         (terms.len(), ranked)
     }
 
@@ -214,6 +217,20 @@ impl Bm25Index {
         }
         self.by_path.retain(|_, slots| !slots.is_empty());
     }
+}
+
+/// Leaves the `k` best of `ranked`, best first: higher score, then lower
+/// slot. Only those are sorted, which matters for terms in most documents.
+fn keep_best(ranked: &mut Vec<(u32, f32, u16)>, k: usize) {
+    let best_first = |a: &(u32, f32, u16), b: &(u32, f32, u16)| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0));
+    if k == 0 {
+        ranked.clear();
+    } else if k < ranked.len() {
+        ranked.select_nth_unstable_by(k - 1, best_first);
+        ranked.truncate(k);
+    }
+    // Slots are unique, so the order is total and an unstable sort is exact.
+    ranked.sort_unstable_by(best_first);
 }
 
 /// Code-aware tokenizer: lowercase alphanumeric words, plus the parts of
@@ -270,6 +287,54 @@ mod tests {
     }
 
     use super::*;
+
+    /// Scoring as it was before top-k selection: score everything, sort all.
+    fn reference(index: &Bm25Index, query: &str) -> Vec<(String, f32)> {
+        let mut terms: Vec<String> = tokenize(query).collect();
+        terms.sort();
+        terms.dedup();
+        let n = index.live as f32;
+        let avg_len = (index.total_len as f32 / index.live as f32).max(1.0);
+        let mut scores: HashMap<u32, f32> = HashMap::new();
+        for term in &terms {
+            let Some(postings) = index.postings.get(term) else { continue };
+            let live: Vec<_> = postings.iter().filter(|(slot, _)| index.docs[*slot as usize].live).collect();
+            let df = live.len() as f32;
+            let idf = (1.0 + (n - df + 0.5) / (df + 0.5)).ln();
+            for &&(slot, tf) in &live {
+                let (tf, len) = (f32::from(tf), index.docs[slot as usize].len as f32);
+                *scores.entry(slot).or_default() += idf * tf * (K1 + 1.0) / (tf + K1 * (1.0 - B + B * len / avg_len));
+            }
+        }
+        let mut ranked: Vec<(u32, f32)> = scores.into_iter().collect();
+        ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        ranked.into_iter().map(|(slot, score)| (index.docs[slot as usize].chunk_id.clone(), score)).collect()
+    }
+
+    #[test]
+    fn top_k_matches_a_full_sort_with_ties_and_tombstones() {
+        let mut index = Bm25Index::default();
+        for i in 0..400 {
+            // Few distinct shapes, so many documents tie exactly.
+            let text = format!("{}{}", "alpha ".repeat(1 + i % 3), if i % 7 == 0 { "beta gamma" } else { "delta" });
+            index.add(&format!("c{i}"), &format!("f{i}.rs"), &text);
+        }
+        let check = |index: &Bm25Index| {
+            for query in ["alpha", "beta", "alpha beta delta", "gamma alpha", "missing"] {
+                let full = reference(index, query);
+                for k in [0, 1, 2, 10, 57, 100, full.len(), full.len() + 5] {
+                    assert_eq!(index.search(query, k), full[..k.min(full.len())], "{query} k={k}");
+                }
+            }
+        };
+        check(&index);
+        // Few enough removals to leave tombstones instead of compacting.
+        for i in (0..400).step_by(5) {
+            index.remove_path(&format!("f{i}.rs"));
+        }
+        assert!(index.docs.len() > index.len(), "tombstones expected");
+        check(&index);
+    }
 
     #[test]
     fn tokenizer_splits_identifiers() {

@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-26
+
+### Added
+
+- `brok doctor` warns when `embeddings.batch_size` is large enough to take gigabytes while indexing on a CPU, and shows how to lower it; it changes nothing itself (brokspace/brok#72).
+- `brok storage [--json]` reports the disk a workspace uses per kind of data and per partition, the shared model cache, and leftovers (indexes of removed repositories, replaced chunk store generations, old temporary files). It deletes nothing (brokspace/brok#74).
+
+### Changed
+
+- Built on `brok-sdk` 0.3.1: events waiting to be handled are limited to 32 MiB as well as 256 events, so large events can no longer queue gigabytes (brokspace/brok-sdk#25).
+- Semantic indexing uses far less memory on a CPU: `embeddings.batch_size` now defaults to 1 (about 0.5 GB instead of 3.1 GB at peak, and faster). Existing `brok.yml` files that set 16 keep it; see the troubleshooting guide (brokspace/brok#72).
+- Faster text search for common words: only the results that are returned get sorted, with the same ranking and scores (brokspace/brok#162).
+- Indexing no longer keeps a list of every workspace file in memory while it looks for changes (brokspace/brok#72).
+
+### Fixed
+
+- `brok start` returns once the index service can answer, and commands that reach a daemon that is still starting wait for it, instead of timing out after 60 seconds (brokspace/brok#179).
+
 ## [0.9.0] - 2026-11-26
 
 ### Added

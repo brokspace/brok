@@ -92,3 +92,29 @@ Editors call `brok bug --json` (with `--title`, `--what-happened`,
 `--context` for their own versions) and open the returned `url` themselves.
 Security issues never go in a public issue: see the repository's security
 policy.
+
+## `.brokspace/` takes too much space
+
+Run `brok storage` (or `brok storage --json`). It shows the size of each kind of data and of each
+partition's index, the embedding models shared by your workspaces, and what looks left over:
+
+- the index of a submodule or nested repository that is not part of the workspace now (it is reused if
+  the repository comes back);
+- chunk store generations that were replaced;
+- temporary files older than an hour.
+
+The command only reads. Check a path before removing it, with brok stopped. To rebuild an index from
+scratch, use `brok index --rebuild`. Old versions kept inside a LanceDB store are not reported as
+left over.
+
+## Indexing uses gigabytes of memory
+
+With semantic search, memory grows steeply with `embeddings.batch_size`. `brok doctor` warns about it. Workspaces created by brok
+0.9 or earlier have `batch_size: 16` written in `brok.yml`, which can take more than 3 GB. Lower it
+and restart brok (the index does not need rebuilding):
+
+```sh
+brok config set embeddings.batch_size 1
+brok restart
+```
+
