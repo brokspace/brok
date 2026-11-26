@@ -158,7 +158,7 @@ async fn writer_requires_the_model_when_embeddings_are_enabled() {
 /// Embeds like [`HashEmbedder`] but fails after `budget` calls, as a run that
 /// is stopped halfway.
 struct StopsAfter {
-    budget: std::sync::atomic::AtomicUsize,
+    budget: std::sync::Mutex<usize>,
 }
 
 impl Embedder for StopsAfter {
@@ -169,11 +169,10 @@ impl Embedder for StopsAfter {
         HashEmbedder.model_id()
     }
     fn embed(&self, texts: &[String], kind: EmbedKind) -> Result<Vec<Vec<f32>>> {
-        use std::sync::atomic::Ordering;
-        if kind == EmbedKind::Document
-            && self.budget.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1)).is_err()
-        {
-            anyhow::bail!("stopped");
+        if kind == EmbedKind::Document {
+            let mut left = self.budget.lock().unwrap();
+            let Some(rest) = left.checked_sub(1) else { anyhow::bail!("stopped") };
+            *left = rest;
         }
         HashEmbedder.embed(texts, kind)
     }
