@@ -6,6 +6,9 @@
 //! removed.
 
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use brok_bus::{Bus, Grant};
@@ -14,11 +17,15 @@ use brok_index::{Access, Index};
 use brok_sdk::frame::ShardContext;
 use brok_sdk::payload::Shutdown;
 use brok_sdk::{BrokClient, ConnectOptions, transport};
-use brok_shard::{LaunchSpec, Registry, SandboxEnv, supervise};
+use brok_shard::{LaunchSpec, Registry, SYSTEM_AGENT, SandboxEnv, supervise};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
+use crate::daemon::INDEX_SERVICE;
 use crate::ui;
+
+/// How long the agent may take to subscribe before clients stop waiting for it.
+const AGENT_GRACE: Duration = Duration::from_secs(20);
 
 /// Arguments of `brok run`.
 #[derive(Debug, clap::Args)]
@@ -52,12 +59,19 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
 
     // Control: `brok stop` and `brok start` readiness checks.
     let stop_requested = CancellationToken::new();
-    start_control_service(&bus, stop_requested.clone()).await;
+    let expect_agent = !args.no_shards
+        && workspace.config().shard_enabled(SYSTEM_AGENT)
+        && Registry::new(&paths).get(SYSTEM_AGENT).ok().flatten().is_some_and(|s| s.is_runnable());
+    let index_unavailable = Arc::new(AtomicBool::new(false));
+    let startup = Startup { since: Instant::now(), index_unavailable: Arc::clone(&index_unavailable), expect_agent };
+    start_control_service(&bus, stop_requested.clone(), startup).await;
 
     // Index service.
     let index_shutdown = CancellationToken::new();
     let mut tasks = JoinSet::new();
-    start_index_service(&workspace, &bus, &index_shutdown, &mut tasks).await;
+    if !start_index_service(&workspace, &bus, &index_shutdown, &mut tasks).await {
+        index_unavailable.store(true, Ordering::Relaxed);
+    }
     catch_up_links(&workspace);
     brok_core::metrics::prune(workspace.paths(), &workspace.config().metrics);
 
@@ -121,8 +135,31 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
     Ok(())
 }
 
+/// What `daemon:status` needs to say which services are still starting.
+struct Startup {
+    since: Instant,
+    index_unavailable: Arc<AtomicBool>,
+    expect_agent: bool,
+}
+
+impl Startup {
+    /// Services that cannot receive requests yet, given who has subscribed.
+    fn starting(&self, subscribed: &[String]) -> Vec<String> {
+        let missing = |name: &str| !subscribed.iter().any(|s| s == name);
+        let mut starting = Vec::new();
+        if !self.index_unavailable.load(Ordering::Relaxed) && missing(INDEX_SERVICE) {
+            starting.push(INDEX_SERVICE.to_owned());
+        }
+        // An agent that keeps failing must not hold clients back forever.
+        if self.expect_agent && missing(SYSTEM_AGENT) && self.since.elapsed() < AGENT_GRACE {
+            starting.push(SYSTEM_AGENT.to_owned());
+        }
+        starting
+    }
+}
+
 /// Answers `daemon:status` and turns `daemon:stop` into a graceful shutdown.
-async fn start_control_service(bus: &Bus, stop: CancellationToken) {
+async fn start_control_service(bus: &Bus, stop: CancellationToken, startup: Startup) {
     use crate::daemon::{DaemonStatus, DaemonStatusReply, DaemonStop};
     let pattern = |s: &str| brok_sdk::TopicPattern::new(s).expect("valid pattern");
     let grant = Grant::service("brok-daemon", vec![pattern("daemon:*")], vec![pattern("daemon:*")]);
@@ -145,7 +182,12 @@ async fn start_control_service(bus: &Bus, stop: CancellationToken) {
             if event.is::<DaemonStop>() {
                 stop.cancel();
             } else if event.is::<DaemonStatus>() {
-                let reply = DaemonStatusReply { pid: std::process::id(), identities: bus.stats().await.identities };
+                let stats = bus.stats().await;
+                let reply = DaemonStatusReply {
+                    pid: std::process::id(),
+                    starting: startup.starting(&stats.subscribed),
+                    identities: stats.identities,
+                };
                 let _ = client.reply(&event, &reply).await;
             }
         }
@@ -184,8 +226,14 @@ fn catch_up_links(workspace: &Workspace) {
 }
 
 /// Opens the index for writing (falling back to read-only search when the
-/// model or the write lock is unavailable) and serves it on the bus.
-async fn start_index_service(workspace: &Workspace, bus: &Bus, shutdown: &CancellationToken, tasks: &mut JoinSet<()>) {
+/// model or the write lock is unavailable) and serves it on the bus. Returns
+/// whether the service joined the bus.
+async fn start_index_service(
+    workspace: &Workspace,
+    bus: &Bus,
+    shutdown: &CancellationToken,
+    tasks: &mut JoinSet<()>,
+) -> bool {
     let embedder = match brok_index::load_embedder(&workspace.config().embeddings, &workspace.paths().models) {
         Ok(embedder) => embedder,
         Err(e) => {
@@ -201,15 +249,15 @@ async fn start_index_service(workspace: &Workspace, bus: &Bus, shutdown: &Cancel
                 Ok(index) => (index, false),
                 Err(e) => {
                     ui::error(&format!("index unavailable: {e:#}"));
-                    return;
+                    return false;
                 }
             }
         }
     };
 
-    let grant = Grant::service("brok-index", brok_index::service::publishes(), brok_index::service::subscribes());
+    let grant = Grant::service(INDEX_SERVICE, brok_index::service::publishes(), brok_index::service::subscribes());
     let token = bus.authenticator().issue(grant);
-    let options = ConnectOptions::new("brok-index", env!("CARGO_PKG_VERSION"), token.expose());
+    let options = ConnectOptions::new(INDEX_SERVICE, env!("CARGO_PKG_VERSION"), token.expose());
     match BrokClient::connect(bus.endpoint(), options).await {
         Ok((client, inbox)) => {
             tasks.spawn(brok_index::service::serve(
@@ -220,8 +268,12 @@ async fn start_index_service(workspace: &Workspace, bus: &Bus, shutdown: &Cancel
                 inbox,
                 shutdown.clone(),
             ));
+            true
         }
-        Err(e) => ui::error(&format!("index service cannot join the bus: {e:#}")),
+        Err(e) => {
+            ui::error(&format!("index service cannot join the bus: {e:#}"));
+            false
+        }
     }
 }
 
@@ -234,4 +286,30 @@ fn write_secret(path: &Path, secret: &str) -> Result<()> {
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn startup(expect_agent: bool, since: Instant) -> Startup {
+        Startup { since, index_unavailable: Arc::default(), expect_agent }
+    }
+
+    #[test]
+    fn services_are_starting_until_they_subscribe() {
+        let startup = startup(true, Instant::now());
+        assert_eq!(startup.starting(&[]), [INDEX_SERVICE, SYSTEM_AGENT]);
+        assert_eq!(startup.starting(&[INDEX_SERVICE.to_owned()]), [SYSTEM_AGENT]);
+        assert!(startup.starting(&[INDEX_SERVICE.to_owned(), SYSTEM_AGENT.to_owned()]).is_empty());
+    }
+
+    #[test]
+    fn nobody_waits_for_a_service_that_will_not_come() {
+        let late = startup(true, Instant::now().checked_sub(AGENT_GRACE).unwrap());
+        assert_eq!(late.starting(&[]), [INDEX_SERVICE]);
+        late.index_unavailable.store(true, Ordering::Relaxed);
+        assert!(late.starting(&[]).is_empty());
+        assert_eq!(startup(false, Instant::now()).starting(&[]), [INDEX_SERVICE]);
+    }
 }
