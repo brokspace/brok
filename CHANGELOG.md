@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-26
+
 ### Added
 
 - A step-by-step guide, `docs/shard-tutorial.md`, builds a complete shard from an empty folder; the shard reference lists the shards made by Brokspace, and its examples and the `write-shard` skill declare a `brok` range that includes current releases.
