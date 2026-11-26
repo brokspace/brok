@@ -37,6 +37,10 @@ pub struct DaemonStatusReply {
     /// from before this field sends none.
     #[serde(default)]
     pub starting: Vec<String>,
+    /// Whether a shard is subscribed to `agent:ask`. A daemon from before
+    /// this field does not say.
+    #[serde(default)]
+    pub answers_asks: Option<bool>,
 }
 impl Payload for DaemonStatusReply {
     const TOPIC: &'static str = "daemon:status.result";
@@ -98,7 +102,54 @@ pub async fn connect_or_start(workspace: &Workspace) -> Result<(BrokClient, Inbo
     }
     let connection = connect(workspace).await?;
     wait_started(&connection.0, &[SYSTEM_AGENT], READY_TIMEOUT).await;
+    // Without a subscriber the question would go nowhere and the caller would
+    // wait for minutes.
+    if let Ok(status) =
+        connection.0.call::<DaemonStatus, DaemonStatusReply>(&DaemonStatus {}, Duration::from_secs(3)).await
+        && status.answers_asks == Some(false)
+    {
+        bail!("{}", nobody_answers(AgentState::of(workspace)));
+    }
     Ok(connection)
+}
+
+/// Why `brok-agent` may be missing from the bus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AgentState {
+    Disabled,
+    NotInstalled,
+    NoBinary,
+    NotConnected,
+}
+
+impl AgentState {
+    fn of(workspace: &Workspace) -> Self {
+        if !workspace.config().shard_enabled(SYSTEM_AGENT) {
+            return Self::Disabled;
+        }
+        match Registry::new(workspace.paths()).get(SYSTEM_AGENT) {
+            Ok(Some(agent)) if agent.is_runnable() => Self::NotConnected,
+            Ok(Some(_)) => Self::NoBinary,
+            _ => Self::NotInstalled,
+        }
+    }
+}
+
+/// What happened and the one thing to do next.
+fn nobody_answers(agent: AgentState) -> String {
+    let why = match agent {
+        AgentState::Disabled => {
+            "brok-agent is turned off in brok.yml. Run `brok config set shards.brok-agent.enabled true`, then `brok restart`"
+        }
+        AgentState::NotInstalled => {
+            "brok-agent is not installed. Put it next to brok (the install script does), run `brok init`, then `brok restart`"
+        }
+        AgentState::NoBinary => "the brok-agent program is missing. Run `brok init`, then `brok restart`",
+        AgentState::NotConnected => {
+            "brok-agent is installed but not connected. See why with `brok logs`, then run `brok restart`"
+        }
+    };
+    format!("nothing can answer: {why}")
 }
 
 /// The daemon's view of who is connected (`None` when it does not answer).
@@ -198,11 +249,15 @@ async fn wait_ready(workspace: &Workspace, pid: u32, timeout: Duration) -> Resul
     let expect_agent = workspace.config().shard_enabled(SYSTEM_AGENT)
         && Registry::new(workspace.paths()).get(SYSTEM_AGENT).ok().flatten().is_some_and(|s| s.is_runnable());
     loop {
+        // An agent that has not connected stops counting as starting after a
+        // grace period: brok is then ready, without it.
         if is_running(workspace).await
             && let Some(status) = status(workspace).await
             && status.starting.is_empty()
-            && (!expect_agent || status.identities.iter().any(|i| i == SYSTEM_AGENT))
         {
+            if expect_agent && !status.identities.iter().any(|i| i == SYSTEM_AGENT) {
+                ui::warn(&nobody_answers(AgentState::NotConnected));
+            }
             return Ok(());
         }
         if Instant::now() > deadline {
@@ -266,6 +321,16 @@ mod tests {
         let token = bus.authenticator().issue(grant);
         let options = ConnectOptions::new(name, "0.0.0", token.expose());
         BrokClient::connect(bus.endpoint(), options).await.unwrap()
+    }
+
+    #[test]
+    fn a_missing_agent_is_explained_with_one_next_step() {
+        use super::{AgentState, nobody_answers};
+        for state in [AgentState::Disabled, AgentState::NotInstalled, AgentState::NoBinary, AgentState::NotConnected] {
+            let text = nobody_answers(state);
+            assert!(text.starts_with("nothing can answer: "), "{text}");
+            assert!(text.contains("`brok restart`"), "{state:?}: {text}");
+        }
     }
 
     #[tokio::test]

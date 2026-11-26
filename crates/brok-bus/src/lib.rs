@@ -25,7 +25,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use brok_sdk::transport::{Endpoint, Listener};
-use brok_sdk::{Event, Payload};
+use brok_sdk::{Event, Payload, Topic};
 use tokio_util::sync::CancellationToken;
 
 pub use auth::{Authenticator, Grant, Role, SessionToken};
@@ -102,6 +102,12 @@ impl Bus {
     pub async fn emit<P: Payload>(&self, payload: &P) -> Result<(), serde_json::Error> {
         self.publish(Event::from_payload(payload)?).await;
         Ok(())
+    }
+
+    /// Identities of the sessions subscribed to `topic`, sorted: who a
+    /// publication on it would reach.
+    pub async fn subscribers(&self, topic: Topic) -> Vec<String> {
+        self.router.subscribers(topic).await
     }
 
     /// Current counters.

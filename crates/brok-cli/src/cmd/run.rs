@@ -25,7 +25,7 @@ use crate::daemon::INDEX_SERVICE;
 use crate::ui;
 
 /// How long the agent may take to subscribe before clients stop waiting for it.
-const AGENT_GRACE: Duration = Duration::from_secs(20);
+const AGENT_GRACE: Duration = Duration::from_secs(8);
 
 /// Arguments of `brok run`.
 #[derive(Debug, clap::Args)]
@@ -183,10 +183,14 @@ async fn start_control_service(bus: &Bus, stop: CancellationToken, startup: Star
                 stop.cancel();
             } else if event.is::<DaemonStatus>() {
                 let stats = bus.stats().await;
+                let ask = brok_sdk::Topic::new(brok_sdk::payload::topics::AGENT_ASK).expect("a valid topic");
+                // The operator's own sessions (`brok bus tail`) answer nothing.
+                let answers = bus.subscribers(ask).await.iter().any(|identity| identity != "operator");
                 let reply = DaemonStatusReply {
                     pid: std::process::id(),
                     starting: startup.starting(&stats.subscribed),
                     identities: stats.identities,
+                    answers_asks: Some(answers),
                 };
                 let _ = client.reply(&event, &reply).await;
             }
