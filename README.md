@@ -153,6 +153,7 @@ your workspaces, so `brok init` in the next project takes seconds.
 | [Shards in Python, TypeScript and Java](docs/shards-other-languages.md) | The protocol, working examples and packaging |
 | [Configuration](docs/configuration.md) | Every `brok.yml` key |
 | [Architecture](docs/architecture.md) | How indexing, search and the bus work |
+| [Developer experience roadmap](docs/dx/README.md) | The current priority: audit, journeys, specifications and diagrams |
 
 ## How it works
 

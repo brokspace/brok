@@ -1,0 +1,10 @@
+flowchart LR
+    N1[brok#195 ignore rules] --> M1((M1 done))
+    N4[brok#199 review without commits] --> M1
+    I46[brok#46 versions] --> V19[vscode#19 install brok and agent] --> M1
+    N2[brok#197 fail fast] --> M1
+    N3[brok#198 consent] --> V46[vscode#46 checklist] --> M1
+    M1 --> DR[design record: text first] --> N5[brok#200 text first, saved batches] --> N6[brok#201 readiness in status] --> VST[vscode: status line]
+    VST --> M2((M2 done))
+    M2 --> M3[vscode: daily productivity]
+    M1 --> M4[website and docs]

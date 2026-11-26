@@ -1,0 +1,7 @@
+flowchart LR
+    SETUP[brok setup agents] --> F[".agents/skills and MCP config in the repository"]
+    AGENT[Coding agent] -- starts --> MCP[brok mcp]
+    MCP --> T[search and memory tools]
+    T --> IDX[(index)]
+    T --> MEM[(memories)]
+    VS[VS Code 1.101+] -. "registers brok mcp itself" .-> MCP

@@ -1,0 +1,10 @@
+%% No new service and no new store: readiness and next actions come from brok.
+flowchart LR
+    VS[VS Code extension] -- "--json" --> CLI[brok CLI]
+    CLI --> ST["status --json: readiness of agent, index, model and one next action"]:::new
+    CLI --> ERR["errors with a stable code and a fix"]:::new
+    CLI --> BUS[(event bus)]
+    BUS <--> SVC[index service: text first, vectors after, saved in batches]:::new
+    BUS <--> AGENT[brok-agent]
+    VS --> DL["download of brok and brok-agent, verified"]:::new
+    classDef new stroke-dasharray: 5 5

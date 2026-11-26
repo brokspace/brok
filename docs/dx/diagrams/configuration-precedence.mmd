@@ -1,0 +1,8 @@
+flowchart TD
+    D[Built in defaults] --> W[".brokspace/brok.yml: source of truth"]
+    U[User defaults from brok setup llm] -- "copied at brok init" --> W
+    F[Command flags, for one run] --> E[Effective behaviour]
+    W --> E
+    ENV[Environment: API keys, BROK_MODELS_DIR] --> E
+    VSS["VS Code settings: where brok is and editor preferences only"] --> X[Extension]
+    X -- "changes workspace settings through brok config" --> W
