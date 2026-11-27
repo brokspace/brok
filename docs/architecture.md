@@ -83,6 +83,13 @@ Both stores share one Arrow schema (`brok-index/src/schema.rs`): `id`, `path`,
   16 writes and an IVF-PQ index with the cosine metric is built past 10 000
   rows. Queries re-rank ten times the wanted results with the stored vectors
   ([measurements](benchmarks.md#vector-index)).
+- **Two passes** ([ADR 0018](adr/0018-text-first-indexing.md)): changed files
+  are first stored and added to the keyword index without vectors, so they are
+  searchable at once. Vectors are then computed and saved about once a minute
+  (whole files; a long run that is interrupted resumes from the last save). A
+  partition is searched by meaning once 95% of its chunks have a vector. The
+  daemon holds the index only while saving, and takes over from a `brok index`
+  that was writing when it started.
 - **Arrow IPC**: each commit writes a new immutable generation file and flips
   `CURRENT`. Files are memory-mapped and decoded zero-copy; immutability is
   what makes `mmap` sound and lets readers keep an old generation (Windows

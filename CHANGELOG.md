@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Search works within seconds on a new workspace: indexing first stores the text and keyword index, then computes vectors, saving about once a minute. Interrupting keeps what is done and the next run continues. A partition is searched by meaning once 95% of it has vectors, and `brok status` and `brok doctor` show the progress. The daemon answers searches while embedding and takes over from a `brok index` running beside it. On Linux, memory freed between the passes is handed back to the system, so the peak stays close to a single pass. New and rebuilt indexes work this way; brok 0.11 and earlier rebuild them (brokspace/brok#200, ADR 0018).
+
+## [0.11.0] - 2026-11-27
+
 ### Added
 
 - Shards in Python, TypeScript and Java: a guide to the protocol and packaging (`docs/shards-other-languages.md`) and three working examples in `examples/shards`, tested in CI on Linux and macOS.

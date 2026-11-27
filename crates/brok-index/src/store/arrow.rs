@@ -28,7 +28,7 @@ use arrow_ipc::root_as_footer;
 use arrow_ipc::writer::FileWriter;
 
 use crate::chunk::Chunk;
-use crate::schema::{ChunkColumns, Precision, chunk_schema, schema_dims, schema_precision, to_record_batch};
+use crate::schema::{ChunkColumns, VectorFormat, chunk_schema, schema_dims, schema_format, to_record_batch};
 
 pub(crate) const CURRENT: &str = "CURRENT";
 /// Batches are coalesced on commit once there are more than this many.
@@ -38,7 +38,7 @@ const MAX_BATCHES: usize = 8;
 pub struct ArrowStore {
     dir: PathBuf,
     dims: Option<usize>,
-    precision: Precision,
+    format: VectorFormat,
     generation: u64,
     batches: Vec<RecordBatch>,
     ids: HashMap<String, (usize, usize)>,
@@ -55,11 +55,11 @@ impl ArrowStore {
         let batches = if generation == 0 { Vec::new() } else { read_ipc(&generation_path(dir, generation))? };
         // Existing data keeps its own layout; `dims` only applies to new stores.
         let dims = batches.first().map_or(dims, |first| schema_dims(&first.schema()));
-        let precision = batches.first().and_then(|first| schema_precision(&first.schema())).unwrap_or_default();
+        let format = batches.first().and_then(|first| schema_format(&first.schema())).unwrap_or_default();
         let mut store = Self {
             dir: dir.to_path_buf(),
             dims,
-            precision,
+            format,
             generation,
             batches,
             ids: HashMap::new(),
@@ -74,15 +74,15 @@ impl ArrowStore {
         self.dims
     }
 
-    /// Makes an empty store write vectors of another type, as old ones did.
+    /// Makes an empty store write another format, as older versions did.
     #[cfg(test)]
-    pub(crate) fn set_precision(&mut self, precision: Precision) {
-        assert!(self.batches.is_empty(), "the store already has a type");
-        self.precision = precision;
+    pub(crate) fn set_format(&mut self, format: VectorFormat) {
+        assert!(self.batches.is_empty(), "the store already has a format");
+        self.format = format;
     }
 
-    pub(crate) fn precision(&self) -> Precision {
-        self.precision
+    pub(crate) fn format(&self) -> VectorFormat {
+        self.format
     }
 
     pub(crate) fn count(&self) -> usize {
@@ -94,7 +94,7 @@ impl ArrowStore {
     }
 
     pub(crate) fn append(&mut self, chunks: &[Chunk], vectors: Option<&[Vec<f32>]>) -> Result<()> {
-        self.pending_appends.push(to_record_batch(chunks, vectors, self.dims, self.precision)?);
+        self.pending_appends.push(to_record_batch(chunks, vectors, self.dims, self.format)?);
         Ok(())
     }
 
@@ -115,12 +115,12 @@ impl ArrowStore {
         }
         next.append(&mut self.pending_appends);
         if next.len() > MAX_BATCHES {
-            let schema = chunk_schema(self.dims, self.precision);
+            let schema = chunk_schema(self.dims, self.format);
             next = vec![arrow_select::concat::concat_batches(&schema, &next)?];
         }
 
         let generation = self.generation + 1;
-        write_ipc(&generation_path(&self.dir, generation), &chunk_schema(self.dims, self.precision), &next)?;
+        write_ipc(&generation_path(&self.dir, generation), &chunk_schema(self.dims, self.format), &next)?;
         brok_core::fsutil::write_atomic(&self.dir.join(CURRENT), generation.to_string().as_bytes())?;
 
         // Release the old mapping before reopening, then garbage collect.
@@ -248,6 +248,7 @@ fn read_ipc(path: &Path) -> Result<Vec<RecordBatch>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::Precision;
     use crate::schema::tests::sample;
 
     #[test]
@@ -288,20 +289,37 @@ mod tests {
         let mut store = ArrowStore::open(new.path(), Some(2)).unwrap();
         store.append(&chunks, Some(&vectors)).unwrap();
         store.commit().unwrap();
-        assert_eq!(ArrowStore::open(new.path(), Some(2)).unwrap().precision(), Precision::Half);
+        assert_eq!(ArrowStore::open(new.path(), Some(2)).unwrap().format(), VectorFormat::default());
 
         // An index written by an earlier brok.
         let old = tempfile::tempdir().unwrap();
-        let batch = to_record_batch(&chunks, Some(&vectors), Some(2), Precision::Single).unwrap();
+        let single = VectorFormat { precision: Precision::Single, optional: false };
+        let batch = to_record_batch(&chunks, Some(&vectors), Some(2), single).unwrap();
         write_ipc(&generation_path(old.path(), 1), &batch.schema(), std::slice::from_ref(&batch)).unwrap();
         std::fs::write(old.path().join(CURRENT), "1").unwrap();
         let mut store = ArrowStore::open(old.path(), Some(2)).unwrap();
-        assert_eq!(store.precision(), Precision::Single);
+        assert_eq!(store.format(), single);
         store.append(&[sample("c1", "c.rs")], Some(&[vec![0.6, 0.8]])).unwrap();
         store.commit().unwrap();
         let reopened = ArrowStore::open(old.path(), Some(2)).unwrap();
-        assert_eq!((reopened.precision(), reopened.count()), (Precision::Single, 3));
+        assert_eq!((reopened.format(), reopened.count()), (single, 3));
         assert_eq!(reopened.vector_search(&[0.6, 0.8], 1)[0].0, "c1");
+    }
+
+    #[test]
+    fn rows_waiting_for_vectors_are_kept_and_not_matched() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = ArrowStore::open(dir.path(), Some(2)).unwrap();
+        store.append(&[sample("a1", "a.rs"), sample("b1", "b.rs")], None).unwrap();
+        store.commit().unwrap();
+        let mut store = ArrowStore::open(dir.path(), Some(2)).unwrap();
+        assert_eq!(store.count(), 2);
+        assert!(store.vector_search(&[1.0, 0.0], 5).is_empty());
+        store.delete_paths(&["a.rs".to_string()]);
+        store.append(&[sample("a1", "a.rs")], Some(&[vec![1.0, 0.0]])).unwrap();
+        store.commit().unwrap();
+        let found = store.vector_search(&[1.0, 0.0], 5);
+        assert_eq!((store.count(), found.len(), found[0].0.as_str()), (2, 1, "a1"));
     }
 
     #[test]

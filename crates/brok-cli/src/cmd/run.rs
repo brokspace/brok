@@ -245,6 +245,16 @@ async fn start_index_service(
             None
         }
     };
+    let takeover = {
+        let (workspace, embedder) = (workspace.clone(), embedder.clone());
+        brok_index::service::Takeover {
+            paths: workspace.paths().clone(),
+            reopen: Arc::new(move |access| {
+                let (workspace, embedder) = (workspace.clone(), embedder.clone());
+                Box::pin(async move { Index::open(&workspace, embedder, access).await })
+            }),
+        }
+    };
     let (index, writable) = match Index::open(workspace, embedder.clone(), Access::ReadWrite).await {
         Ok(index) => (index, true),
         Err(e) => {
@@ -267,6 +277,7 @@ async fn start_index_service(
             tasks.spawn(brok_index::service::serve(
                 index,
                 writable,
+                Some(takeover),
                 Some(super::scope::widener(workspace.clone())),
                 client,
                 inbox,

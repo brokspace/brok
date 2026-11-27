@@ -16,7 +16,7 @@ use lancedb::{DistanceType, Table};
 use super::sql_list;
 use crate::chunk::Chunk;
 use crate::schema::{
-    Precision, VECTOR_COLUMN, chunk_schema, from_record_batch, schema_dims, schema_precision, to_record_batch,
+    VECTOR_COLUMN, VectorFormat, chunk_schema, from_record_batch, schema_dims, schema_format, to_record_batch,
 };
 
 const TABLE: &str = "chunks";
@@ -37,39 +37,52 @@ const FILTER_BATCH: usize = 256;
 pub struct LanceStore {
     table: Table,
     dims: Option<usize>,
-    precision: Precision,
+    format: VectorFormat,
     writes_since_optimize: usize,
 }
 
 impl LanceStore {
     /// Opens or creates the `chunks` table in `dir`.
     pub async fn open(dir: &Path, dims: Option<usize>) -> Result<Self> {
-        Self::open_as(dir, dims, Precision::default()).await
+        Self::open_as(dir, dims, VectorFormat::default()).await
     }
 
-    /// [`Self::open`], creating a new table with vectors of type `new`.
-    pub(crate) async fn open_as(dir: &Path, dims: Option<usize>, new: Precision) -> Result<Self> {
+    /// [`Self::open`], creating a new table with vectors in the format `new`.
+    pub(crate) async fn open_as(dir: &Path, dims: Option<usize>, new: VectorFormat) -> Result<Self> {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         let uri = dir.to_str().context("database path is not valid UTF-8")?;
         let db = lancedb::connect(uri).execute().await.context("opening LanceDB")?;
         // Existing tables keep their own layout; `dims` only applies to new tables.
-        let (table, dims, precision) = if db.table_names().execute().await?.iter().any(|name| name == TABLE) {
+        let (table, dims, format) = if db.table_names().execute().await?.iter().any(|name| name == TABLE) {
             let table = db.open_table(TABLE).execute().await?;
             let schema = table.schema().await?;
-            let precision = schema_precision(schema.as_ref()).unwrap_or_default();
-            (table, schema_dims(schema.as_ref()), precision)
+            let format = schema_format(schema.as_ref()).unwrap_or_default();
+            (table, schema_dims(schema.as_ref()), format)
         } else {
             (db.create_empty_table(TABLE, chunk_schema(dims, new)).execute().await?, dims, new)
         };
-        Ok(Self { table, dims, precision, writes_since_optimize: 0 })
+        Ok(Self { table, dims, format, writes_since_optimize: 0 })
     }
 
     pub(crate) fn dims(&self) -> Option<usize> {
         self.dims
     }
 
-    pub(crate) fn precision(&self) -> Precision {
-        self.precision
+    pub(crate) fn format(&self) -> VectorFormat {
+        self.format
+    }
+
+    /// Removes the versions replaced more than `older_than` ago: filling in
+    /// vectors rewrites rows, and readers may still hold a recent version.
+    pub(crate) async fn prune(&mut self, older_than: std::time::Duration) -> Result<()> {
+        let older_than = chrono::Duration::from_std(older_than).context("prune age")?;
+        let prune = OptimizeAction::Prune {
+            older_than: Some(older_than),
+            delete_unverified: Some(false),
+            error_if_tagged_old_versions: None,
+        };
+        self.table.optimize(prune).await?;
+        Ok(())
     }
 
     pub(crate) async fn delete_paths(&mut self, paths: &[String]) -> Result<()> {
@@ -81,7 +94,7 @@ impl LanceStore {
     }
 
     pub(crate) async fn append(&mut self, chunks: &[Chunk], vectors: Option<&[Vec<f32>]>) -> Result<()> {
-        let batch = to_record_batch(chunks, vectors, self.dims, self.precision)?;
+        let batch = to_record_batch(chunks, vectors, self.dims, self.format)?;
         self.table.add(batch).execute().await?;
         self.writes_since_optimize += 1;
         Ok(())
@@ -92,7 +105,7 @@ impl LanceStore {
             self.table.optimize(OptimizeAction::All).await?;
             self.writes_since_optimize = 0;
         }
-        if self.dims.is_some() && self.count().await? >= ANN_THRESHOLD && !self.has_usable_index().await? {
+        if self.dims.is_some() && self.embedded().await? >= ANN_THRESHOLD && !self.has_usable_index().await? {
             tracing::info!("building ANN vector index");
             // Replaces an index brok 0.11 and earlier built with another metric.
             let index = Index::IvfPq(IvfPqIndexBuilder::default().distance_type(METRIC));
@@ -161,6 +174,12 @@ impl LanceStore {
         Ok(hits)
     }
 
+    /// Rows that have their vector: only they can train an index.
+    async fn embedded(&self) -> Result<usize> {
+        let filter = self.format.optional.then(|| format!("{VECTOR_COLUMN} IS NOT NULL"));
+        Ok(self.table.count_rows(filter).await?)
+    }
+
     pub(crate) async fn count(&self) -> Result<usize> {
         Ok(self.table.count_rows(None).await?)
     }
@@ -173,13 +192,15 @@ mod benchmark;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::Precision;
     use crate::schema::tests::sample;
 
     #[tokio::test]
     async fn a_new_table_is_half_precision_and_an_old_one_stays_single() {
         let chunks = [sample("a1", "a.rs"), sample("b1", "b.rs")];
         let vectors = [vec![1.0, 0.0], vec![0.0, 1.0]];
-        for old in [Precision::Single, Precision::Half] {
+        for precision in [Precision::Single, Precision::Half] {
+            let old = VectorFormat { precision, optional: false };
             let dir = tempfile::tempdir().unwrap();
             let mut store = LanceStore::open_as(dir.path(), Some(2), old).await.unwrap();
             store.append(&chunks, Some(&vectors)).await.unwrap();
@@ -187,7 +208,7 @@ mod tests {
             drop(store);
             // Reopened by this brok: the table keeps its type and takes more rows.
             let mut store = LanceStore::open(dir.path(), Some(2)).await.unwrap();
-            assert_eq!(store.precision(), old);
+            assert_eq!(store.format(), old);
             store.append(&[sample("c1", "c.rs")], Some(&[vec![0.6, 0.8]])).await.unwrap();
             store.commit().await.unwrap();
             let hits = store.vector_search(&[0.6, 0.8], 1).await.unwrap();
@@ -195,7 +216,7 @@ mod tests {
             assert!((hits[0].1 - 1.0).abs() < 1e-3, "{hits:?}");
         }
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(LanceStore::open(dir.path(), Some(2)).await.unwrap().precision(), Precision::Half);
+        assert_eq!(LanceStore::open(dir.path(), Some(2)).await.unwrap().format(), VectorFormat::default());
     }
 
     const DIMS: usize = 32;
@@ -228,6 +249,24 @@ mod tests {
 
     async fn first(store: &LanceStore, seed: usize) -> (String, f32) {
         store.vector_search(&vector(seed), 5).await.unwrap().remove(0)
+    }
+
+    #[tokio::test]
+    async fn rows_waiting_for_vectors_are_not_matched_nor_indexed() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = LanceStore::open(dir.path(), Some(DIMS)).await.unwrap();
+        let waiting: Vec<_> = (0..ANN_THRESHOLD + 5).map(|i| sample(&format!("c{i}"), &format!("f{i}.rs"))).collect();
+        store.append(&waiting, None).await.unwrap();
+        store.commit().await.unwrap();
+        assert!(store.vector_search(&vector(1), 5).await.unwrap().is_empty());
+        assert!(store.table.list_indices().await.unwrap().is_empty(), "nothing to train on");
+        store.delete_paths(&["f1.rs".to_string()]).await.unwrap();
+        store.append(&waiting[1..2], Some(&[vector(1)])).await.unwrap();
+        store.commit().await.unwrap();
+        let found = store.vector_search(&vector(1), 5).await.unwrap();
+        assert_eq!((found.len(), found[0].0.as_str()), (1, "c1"));
+        store.prune(std::time::Duration::ZERO).await.unwrap();
+        assert_eq!(store.count().await.unwrap(), ANN_THRESHOLD + 5);
     }
 
     #[tokio::test]

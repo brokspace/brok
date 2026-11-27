@@ -196,8 +196,11 @@ impl Index {
             for (id, relevance) in part.bm25.search_relevance(text, limit * OVERFETCH) {
                 lists.lexical.push((source(i), id, relevance * weight));
             }
+            // A partition still being embedded is searched by keywords only.
             let compatible = |v: &[f32], model: &str| {
-                part.store.dims() == Some(v.len()) && part.embedding().is_none_or(|e| e.model == model)
+                part.searches_by_meaning()
+                    && part.store.dims() == Some(v.len())
+                    && part.embedding().is_none_or(|e| e.model == model)
             };
             if let Some((v, _)) = vector.filter(|(v, model)| compatible(v, model)) {
                 *semantic = true;

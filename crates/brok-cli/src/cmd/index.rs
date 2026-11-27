@@ -58,7 +58,14 @@ pub async fn index_workspace(workspace: &Workspace, rebuild: bool, progress: boo
                 }
                 *bar = Some(ui::counter(files as u64, id));
             }
-            Progress::Files { done, .. } => {
+            Progress::TextReady { waiting } => {
+                if let Some(old) = bar.take() {
+                    old.finish_and_clear();
+                }
+                ui::success("Text search is ready. Adding search by meaning; Ctrl+C keeps what is done.");
+                *bar = Some(ui::counter(waiting as u64, "chunks"));
+            }
+            Progress::Files { done, .. } | Progress::Vectors { done, .. } => {
                 if let Some(bar) = bar.as_ref() {
                     bar.set_position(done as u64);
                 }
