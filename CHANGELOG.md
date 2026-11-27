@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A search on an Arrow index could fail with "No such file or directory" when the index was written at that moment; it now reads the newer data.
+
 ## [0.12.0] - 2026-11-27
 
 ### Changed
