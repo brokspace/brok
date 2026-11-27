@@ -42,6 +42,9 @@ pub enum Access {
     ReadOnly,
     /// Exclusive writer (holds `databases/.lock`).
     ReadWrite,
+    /// [`Self::ReadWrite`] starting from nothing: the stored partitions are
+    /// removed unread, so a damaged index can be rebuilt.
+    Rebuild,
 }
 
 /// Indexing progress notifications.
@@ -234,7 +237,7 @@ impl Index {
     pub async fn open(workspace: &Workspace, embedder: Option<Arc<dyn Embedder>>, access: Access) -> Result<Self> {
         let config = workspace.config().clone();
         let paths = workspace.paths();
-        let writable = access == Access::ReadWrite;
+        let writable = access != Access::ReadOnly;
         let lock = if writable { Some(acquire_write_lock(paths)?) } else { None };
         if writable && config.embeddings.enabled && embedder.is_none() {
             bail!("embeddings are enabled but no embedding model is loaded");
@@ -246,6 +249,9 @@ impl Index {
         for partition in partitions.iter() {
             if !writable && !partition.database_dir(paths).exists() {
                 continue; // never indexed: nothing to search, and read-only must not create it
+            }
+            if access == Access::Rebuild {
+                PartitionIndex::discard(paths, partition, config.index.store)?;
             }
             let part =
                 PartitionIndex::open(paths, partition.clone(), config.index.store, embedding.clone(), writable).await?;

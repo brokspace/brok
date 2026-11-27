@@ -384,6 +384,32 @@ fn a_search_right_after_start_is_answered() {
 }
 
 #[test]
+fn rebuild_repairs_an_index_that_cannot_be_read() {
+    let dir = tempfile::tempdir().unwrap();
+    workspace_with(dir.path(), "billing.rs", "fn compute_invoice_total() { /* invoice total */ }\n");
+    damage(&dir.path().join(".brokspace/databases/cold"));
+    assert!(!brok(dir.path(), &["search", "--json", "invoice total"]).status.success(), "damaged");
+
+    let rebuilt = brok(dir.path(), &["index", "--rebuild"]);
+    assert!(rebuilt.status.success(), "{}", String::from_utf8_lossy(&rebuilt.stderr));
+    let found = json(&brok(dir.path(), &["search", "--json", "invoice total"]));
+    assert_eq!(found["hits"][0]["path"], "billing.rs", "{found}");
+}
+
+/// Overwrites the chunk data of either store: Arrow generations, or the
+/// versions of a LanceDB table.
+fn damage(dir: &Path) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            damage(&path);
+        } else if path.extension().is_some_and(|e| e == "arrow") || dir.ends_with("_versions") {
+            std::fs::write(path, "not an index").unwrap();
+        }
+    }
+}
+
+#[test]
 fn asking_without_an_agent_fails_at_once_with_the_next_step() {
     struct Stop<'a>(&'a Path);
     impl Drop for Stop<'_> {

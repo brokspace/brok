@@ -12,6 +12,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `brok index --rebuild`, the fix `brok doctor` suggests for an index it cannot read, now works on one: it failed while opening the damaged data.
 - A command run in the moment a daemon is starting waits for it instead of failing with "cannot read .../operator.token", or with an invalid token left behind by a daemon that crashed.
 
 ## [0.11.0] - 2026-11-27
