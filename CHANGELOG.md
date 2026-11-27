@@ -6,10 +6,6 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Fixed
-
-- A search on an Arrow index could fail with "No such file or directory" when the index was written at that moment; it now reads the newer data.
-
 ## [0.12.0] - 2026-11-27
 
 ### Changed
@@ -18,6 +14,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A search on an Arrow index could fail with "No such file or directory" when the index was written at that moment; it now reads the newer data.
 - A command run in the moment a daemon is starting waits for it instead of failing with "cannot read .../operator.token", or with an invalid token left behind by a daemon that crashed.
 
 ## [0.11.0] - 2026-11-27
