@@ -17,6 +17,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A command run in the moment a daemon is starting waits for it instead of failing with "cannot read .../operator.token", or with an invalid token left behind by a daemon that crashed.
 - `brok review` in a repository without commits reviews the staged files, or says to `git add` them, instead of showing git's error; outside a repository it says so (brokspace/brok#199).
 - `ask`, `chat`, `review`, `commit` and `skill run` stop at once, saying what to do, when no shard can answer, instead of waiting for up to 10 minutes. `brok start` no longer fails after a minute when the agent cannot connect: it starts and warns (brokspace/brok#197).
 - **Security:** private files under `.brokspace/` (private memories including saved chats, metrics, member and linked repository clones, shard data and bug reports) could be committed to git. New workspaces ignore them and existing ones are repaired by the next command, keeping your own rules; `brok doctor` reports files already tracked. Ignoring does not remove them from git history: see "Private files were committed" in the troubleshooting guide (brokspace/brok#195).
