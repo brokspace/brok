@@ -1,0 +1,10 @@
+%% One workspace view first; the other trees collapsed until they hold something.
+flowchart TD
+    A[Brokspace activity bar] --> C[Workspace panel]
+    C --> T1[Chat and search]
+    C --> T2[History]
+    C --> T3[Settings]
+    T1 --> ST[Status line: index, agent, model, next action]:::new
+    T3 --> HE[Health and recovery]:::new
+    A --> MORE[Memory, Links, Shards, Skills: collapsed when empty]:::new
+    classDef new stroke-dasharray: 5 5

@@ -20,6 +20,7 @@ use brok_shard::{Registry, SYSTEM_AGENT, ShardSource, find_executable};
 use dialoguer::Confirm;
 
 use super::setup::{agents, llm};
+use crate::integrations;
 use crate::ui;
 
 /// Arguments of `brok init`.
@@ -101,7 +102,15 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
     }
 
     section(6, "Coding agents");
-    if args.no_integrations || !confirm("Connect your coding agents (Brokspace skills + MCP search tool)?")? {
+    let planned = integrations::planned_files(workspace.root(), &integrations::detect(workspace.root()), true, true);
+    let prompt = format!(
+        "Connect your coding agents (Brokspace skills + MCP search tool)? This writes into your project: {}",
+        planned.join(", ")
+    );
+    if !args.no_integrations && !may_write_into_project(ask, args.yes) {
+        // Nobody can be asked, and nobody said yes.
+        ui::step("Skipped: files in your project need your approval (run `brok setup agents`, or pass --yes)");
+    } else if args.no_integrations || !confirm(&prompt)? {
         ui::step("Skipped (run `brok setup agents`)");
     } else {
         let agents_args = agents::Args { yes: !ask, ..agents::Args::default() };
@@ -119,6 +128,12 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
     ui::hint("brok skill list                  # workflows: /ask-brok, /grill-me, /to-spec, tdd...");
     ui::hint("brok doctor                      # if anything looks off");
     Ok(())
+}
+
+/// Files outside `.brokspace/` are written only when someone can be asked, or
+/// passed `--yes`.
+fn may_write_into_project(can_ask: bool, yes: bool) -> bool {
+    can_ask || yes
 }
 
 /// Applies the LLM chosen earlier with `brok setup llm` (in any workspace).

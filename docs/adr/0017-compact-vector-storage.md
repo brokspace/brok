@@ -1,6 +1,6 @@
 # 0017. Store vectors as float16, keep 768 dimensions
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-11-26
 
 ## Context
@@ -52,17 +52,36 @@ measured on written files.
 6. **Older brok versions must not read a `float16` index as having no vectors.** The partition manifest
    version is raised so that an older brok rebuilds the partition instead.
 
-## Before this is accepted
+## Measured on the implementation
 
-The implementation has to show, on both backends:
+`cargo test --release -p brok-index precision_benchmark -- --ignored --nocapture` writes both types with
+each store and searches them (32 results, 50 queries, one Linux x86_64 machine with F16C). The 3356
+chunk set is the real embeddings above; 10 000 and 100 000 are synthetic clustered vectors. Chunks carry
+about 1.2 KB of text. Recall is against exact `float32` search over the same vectors.
 
-- search latency for `float16` against `float32`, at 10 000 and 100 000 chunks (not measured here; the
-  Arrow store scores every vector, and LanceDB builds an index from 10 000 rows);
-- file sizes actually written, including LanceDB's index and old versions;
-- the same recall table from vectors read back from each store.
+| store | chunks | vectors | MB on disk | search p50 ms | p95 ms | recall@32 |
+|---|---:|---|---:|---:|---:|---:|
+| arrow | 3356 | float32 | 14.7 | 2.3 | 2.5 | 100% |
+| arrow | 3356 | float16 | 9.6 | 2.5 | 2.8 | 99.9% |
+| lancedb | 3356 | float32 | 10.4 | 3.6 | 4.2 | 100% |
+| lancedb | 3356 | float16 | 5.3 | 3.4 | 4.2 | 99.9% |
+| arrow | 10000 | float32 | 43.9 | 6.8 | 7.6 | 100% |
+| arrow | 10000 | float16 | 28.6 | 7.5 | 9.0 | 99.9% |
+| lancedb | 10000 | float32 | 63.2 | 13.4 | 15.5 | 100% |
+| lancedb | 10000 | float16 | 32.1 | 11.6 | 12.9 | 100% |
+| arrow | 100000 | float32 | 439.5 | 69.9 | 77.5 | 100% |
+| arrow | 100000 | float16 | 285.9 | 76.5 | 85.2 | 99.9% |
+| lancedb | 100000 | float32 | 632.6 | 107.2 | 123.4 | 100% |
+| lancedb | 100000 | float16 | 325.0 | 72.4 | 86.6 | 99.9% |
 
-LanceDB 0.41 (lance 14) contains `Float16` and `Int8` distance functions; indexed search with them was
-not tried.
+The chunk store shrinks by about 35% (Arrow) and 49% (LanceDB). Arrow search is about 10% slower
+(widening to `f32`), LanceDB search is the same or faster. A machine without hardware conversion
+(older x86, some virtual machines) would be slower in the Arrow store; that was not measured.
+
+While measuring, the LanceDB vector index turned out not to be used: it is built with the L2 metric
+and searched with cosine, so LanceDB scanned every row. This predated this decision and affected both
+types alike, so the LanceDB figures are exact search. Fixed afterwards (brokspace/brok#192,
+[measurements](../benchmarks.md#vector-index)).
 
 ## Limits of the evidence
 

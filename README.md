@@ -150,8 +150,10 @@ your workspaces, so `brok init` in the next project takes seconds.
 | [Skills](docs/skills.md) | Built-in workflows, writing and sharing skills |
 | [Write your first shard](docs/shard-tutorial.md) | A complete shard, step by step |
 | [Shards](docs/shards.md) | Build event-driven integrations, `shard.json` reference |
+| [Shards in Python, TypeScript and Java](docs/shards-other-languages.md) | The protocol, working examples and packaging |
 | [Configuration](docs/configuration.md) | Every `brok.yml` key |
 | [Architecture](docs/architecture.md) | How indexing, search and the bus work |
+| [Developer experience roadmap](docs/dx/README.md) | The current priority: audit, journeys, specifications and diagrams |
 
 ## How it works
 

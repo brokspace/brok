@@ -1,0 +1,12 @@
+sequenceDiagram
+    participant V as Webview
+    participant X as Extension host
+    participant B as brok process
+    participant D as brok run (daemon)
+    V->>X: message (ask, search, setup)
+    X->>B: execFile with --json, abortable
+    B->>D: request over the bus
+    D-->>B: chunks and done
+    B-->>X: NDJSON lines
+    X-->>V: render answer, sources, activity
+    Note over X,B: the extension never reads .brokspace or calls a model itself

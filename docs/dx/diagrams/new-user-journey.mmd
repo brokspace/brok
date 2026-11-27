@@ -1,0 +1,23 @@
+%% Target journey A. Dashed boxes do not exist today.
+flowchart TD
+    A[Install the extension or the CLI] --> B{brok and brok-agent found?}
+    B -- no --> C[Ask, then download both and verify checksums]:::new
+    B -- yes --> D{Version supported?}
+    C --> D
+    D -- no --> E[Explain and offer the update]
+    E --> D
+    D -- yes --> F{Folder open?}
+    F -- no --> G[Open a folder]
+    G --> F
+    F -- yes --> H[Set up: workspace, ignore rules, text index]:::new
+    H --> I[First search works, no LLM needed]:::new
+    H --> J[Semantic index continues with progress and cancel]:::new
+    I --> K{Want written answers?}
+    K -- yes --> L[Choose a local or hosted model, shown what is sent]
+    K -- later --> M[Keep index answers]
+    L --> N{Connect coding agents?}
+    M --> N
+    N -- yes --> O[Show the files that will be written, then write]:::new
+    N -- later --> P[Advanced features appear when relevant]
+    O --> P
+    classDef new stroke-dasharray: 5 5

@@ -17,11 +17,15 @@ use brok_core::{Partition, WorkspacePaths};
 use serde::{Deserialize, Serialize};
 
 use crate::bm25::Bm25Index;
+use crate::schema::Precision;
 use crate::store::{ChunkStore, resolve_backend};
 
 pub(crate) const MANIFEST_FILE: &str = "files.json";
 pub(crate) const BM25_FILE: &str = "bm25.bin";
 const MANIFEST_VERSION: u32 = 1;
+/// Manifest of a partition with `Float16` vectors. brok 0.10 and earlier do
+/// not know it, so they rebuild the partition instead of finding no vectors.
+const HALF_VECTORS_VERSION: u32 = 2;
 
 /// Embedding settings an index was built with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,7 +95,7 @@ impl PartitionIndex {
 
         let manifest = match stored {
             Some(m)
-                if m.version == expected.version
+                if matches!(m.version, MANIFEST_VERSION | HALF_VECTORS_VERSION)
                     && m.backend == expected.backend
                     && m.embedding == expected.embedding =>
             {
@@ -133,6 +137,8 @@ impl PartitionIndex {
     /// Commits the store and persists BM25 and the manifest.
     pub async fn save(&mut self) -> Result<()> {
         self.store.commit().await?;
+        let half = self.store.dims().is_some() && self.store.precision() == Precision::Half;
+        self.manifest.version = if half { HALF_VECTORS_VERSION } else { MANIFEST_VERSION };
         self.bm25.save(&self.dir.join(BM25_FILE))?;
         let json = serde_json::to_vec_pretty(&self.manifest)?;
         brok_core::fsutil::write_atomic(&self.dir.join(MANIFEST_FILE), &json)?;
@@ -156,4 +162,52 @@ fn wipe(dir: &Path) -> Result<()> {
     }
     std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use brok_core::{PartitionMap, Workspace};
+
+    use super::*;
+    use crate::schema::tests::sample;
+
+    #[tokio::test]
+    async fn an_index_with_single_precision_is_kept_until_rebuilt() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".brokspace")).unwrap();
+        std::fs::write(dir.path().join(".brokspace/brok.yml"), "version: 1\n").unwrap();
+        let workspace = Workspace::open(dir.path()).unwrap();
+        let partition = PartitionMap::discover(dir.path(), false).root().clone();
+        let embedding = Some(EmbeddingInfo { model: "test".into(), dims: 2 });
+        let open =
+            || PartitionIndex::open(workspace.paths(), partition.clone(), StoreBackend::Arrow, embedding.clone(), true);
+        let version = || -> u32 {
+            let bytes = std::fs::read(partition.database_dir(workspace.paths()).join(MANIFEST_FILE)).unwrap();
+            serde_json::from_slice::<Manifest>(&bytes).unwrap().version
+        };
+
+        // What brok 0.10 wrote: version 1 and `Float32` vectors.
+        let mut old = open().await.unwrap();
+        // Irrefutable in builds without LanceDB.
+        #[allow(irrefutable_let_patterns)]
+        let ChunkStore::Arrow(store) = &mut old.store else { unreachable!("the arrow backend") };
+        store.set_precision(Precision::Single);
+        old.store.append(&[sample("a1", "a.rs")], Some(&[vec![1.0, 0.0]])).await.unwrap();
+        old.record("a.rs".into(), FileRecord { hash: "h".into(), size: 1, modified: 1, chunks: 1 });
+        old.save().await.unwrap();
+        assert_eq!(version(), 1);
+
+        let mut kept = open().await.unwrap();
+        assert_eq!((kept.files().len(), kept.store.precision()), (1, Precision::Single), "not rebuilt");
+        kept.save().await.unwrap();
+        assert_eq!(version(), 1);
+
+        kept.reset(StoreBackend::Arrow).await.unwrap();
+        kept.store.append(&[sample("a1", "a.rs")], Some(&[vec![1.0, 0.0]])).await.unwrap();
+        kept.record("a.rs".into(), FileRecord { hash: "h".into(), size: 1, modified: 1, chunks: 1 });
+        kept.save().await.unwrap();
+        assert_eq!(version(), 2);
+        let reopened = open().await.unwrap();
+        assert_eq!((reopened.files().len(), reopened.store.precision()), (1, Precision::Half));
+    }
 }

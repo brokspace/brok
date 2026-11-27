@@ -1,0 +1,15 @@
+flowchart TD
+    O[Open project] --> L{Index current?}
+    L -- brok-agent running --> S
+    L -- stopped --> C[Start: catch up on changes] --> S[Search by meaning or name]
+    S --> R[Open the source at its lines]
+    S --> A[Ask, with files or selection attached]
+    A --> Y{Model available?}
+    Y -- yes --> AN[Answer with sources and activity]
+    Y -- no --> IX[Index answer, with a way to connect a model]
+    AN --> M[Remember a decision]
+    AN --> H[Resume later from History]
+    R --> V[Review changes]
+    V --> CM[Commit message from the staged diff]
+    O --> X[Other repositories: links or members, optional]
+    X --> S

@@ -1,0 +1,10 @@
+%% Today. A partition is saved only when all of it is done.
+stateDiagram-v2
+    [*] --> Scanning
+    Scanning --> Processing: changed files
+    Processing --> Processing: chunk, embed, append to store
+    Processing --> Saved: partition complete (keyword index and manifest written)
+    Processing --> Cancelled: Ctrl+C
+    Cancelled --> Scanning: next run starts the partition again
+    Saved --> Watching: brok run with brok-agent
+    Watching --> Processing: file changed

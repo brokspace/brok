@@ -26,7 +26,7 @@ Kinds: `note` (default), `decision`, `fact`, `session` and `handoff`.
 
 | Scope | Folder | Who sees it |
 |---|---|---|
-| `private` (default) | `.brokspace/memory/` | You, in this workspace. Never committed. |
+| `private` (default) | `.brokspace/memory/` | You, in this workspace. Ignored by git ([private files](troubleshooting.md#private-files-were-committed)). |
 | `shared` | `.brokspace-memory/` at the workspace root | Everyone who clones the repository: commit the folder. |
 | `global` | `memory/` in your user configuration directory | You, in every workspace (personal preferences). |
 | `obsidian` | `<vault>/Brokspace/` in your Obsidian vault (optional) | You, in Obsidian and in every workspace that points at the vault. See [obsidian.md](obsidian.md). |

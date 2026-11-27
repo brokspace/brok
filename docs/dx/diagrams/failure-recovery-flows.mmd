@@ -1,0 +1,16 @@
+%% Each failure ends in one explained next action.
+flowchart TD
+    F{What failed?}
+    F --> A[brok missing] --> A1[Download or install guide]
+    F --> B[Version unsupported] --> B1[Update brok, or set brokPath]
+    F --> C[brok-agent missing] --> C1[Install the agent, then retry]:::new
+    F --> D[Offline] --> D1[Text search works; retry model download later]
+    F --> E[Indexing failed or cancelled] --> E1[Resume from what is saved]:::new
+    F --> G[Embedding model missing] --> G1[Text search, offer brok model download]
+    F --> H[No model configured] --> H1[Index answers, connect a model]
+    F --> I[Local model not running] --> I1[Say which URL, offer to start or switch]:::new
+    F --> J[Hosted provider error] --> J1[Show status and which key variable, never the key]
+    F --> K[MCP not connected] --> K1[brok doctor, brok setup agents]
+    F --> L[Repository changed] --> L1[Catch up automatically or reindex]
+    F --> M[Conversation interrupted] --> M1[Keep partial answer, offer retry]
+    classDef new stroke-dasharray: 5 5

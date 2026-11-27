@@ -86,6 +86,47 @@ jobs:
         shell: bash
         run: cargo test --workspace $FEATURES
 
+  shard-examples:
+    name: shard examples (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: brok
+      - uses: actions/checkout@v7
+        with:
+          repository: brokspace/brok-sdk
+          path: brok-sdk
+      - name: Use the brok-sdk checkout
+        run: |
+          mkdir -p .cargo
+          echo '[patch.crates-io]' > .cargo/config.toml
+          echo 'brok-sdk = { path = "brok-sdk" }' >> .cargo/config.toml
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/main' }}
+          workspaces: brok
+          key: shard-examples
+      # The oldest versions the guide promises.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.13"
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Build brok
+        working-directory: brok
+        run: cargo build --no-default-features -p brok-cli
+      - name: Install the examples and check what they publish
+        working-directory: brok
+        run: python3 examples/shards/test.py target/debug/brok
+
   msrv:
     name: MSRV (1.89, lean)
     runs-on: ubuntu-latest

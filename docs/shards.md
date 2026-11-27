@@ -179,8 +179,9 @@ async fn main() -> Result<(), ClientError> {
   Needs `brok-sdk` 0.2.
 
 Shards do not have to be written in Rust: anything that can open a Unix
-socket / named pipe and exchange length-prefixed JSON frames works. The frame
-format is documented in `brok-sdk/src/frame.rs` and `codec.rs`.
+socket / named pipe and exchange length-prefixed JSON frames works. See
+[shards in Python, TypeScript and Java](shards-other-languages.md) for the
+protocol, working examples and packaging.
 
 ## Security
 

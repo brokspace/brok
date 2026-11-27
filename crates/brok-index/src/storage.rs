@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::embed::ModelFiles;
 use crate::partition_index::{BM25_FILE, MANIFEST_FILE};
+use crate::schema::Precision;
 use crate::store::arrow::CURRENT;
 
 /// A temporary file younger than this may still be being written.
@@ -60,7 +61,7 @@ pub struct PartitionUsage {
     /// Chunks recorded in the manifest.
     pub chunks: u64,
     /// Estimated size of the vectors inside the store (`chunks` x dimensions
-    /// x 4 bytes); `None` without semantic search.
+    /// x 2 or 4 bytes); `None` without semantic search.
     pub vector_bytes_estimate: Option<u64>,
     /// No part of the workspace maps to this folder now.
     pub orphaned: bool,
@@ -105,6 +106,9 @@ pub struct StorageReport {
 
 #[derive(Debug, Deserialize)]
 struct ManifestSummary {
+    /// 1 for `Float32` vectors, 2 for `Float16`.
+    #[serde(default)]
+    version: u32,
     #[serde(default)]
     embedding: Option<Dimensions>,
     #[serde(default)]
@@ -215,7 +219,10 @@ fn measure(workspace: &Workspace, now: SystemTime) -> StorageReport {
         let manifest: Option<ManifestSummary> =
             fs::read(dir.join(MANIFEST_FILE)).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok());
         let chunks = manifest.as_ref().map_or(0, |m| m.files.values().map(|f| f.chunks).sum());
-        let vector_bytes_estimate = manifest.as_ref().and_then(|m| m.embedding.as_ref()).map(|e| chunks * e.dims * 4);
+        let vector_bytes_estimate = manifest.as_ref().and_then(|m| {
+            let precision = if m.version >= 2 { Precision::Half } else { Precision::Single };
+            m.embedding.as_ref().map(|e| chunks * e.dims * precision.bytes())
+        });
         let orphaned = !known.contains(&dir);
         if orphaned {
             leftovers.push(Leftover {
@@ -340,6 +347,10 @@ mod tests {
         assert_eq!(partition.vector_bytes_estimate, Some(3 * 768 * 4));
         assert!(!partition.orphaned);
         assert!(report.leftovers.is_empty(), "{:?}", report.leftovers);
+
+        let half = manifest.replacen('{', r#"{"version":2,"#, 1);
+        fs::write(root.join(".brokspace/databases/cold/files.json"), half).unwrap();
+        assert_eq!(super::report(&workspace).partitions[0].vector_bytes_estimate, Some(3 * 768 * 2));
     }
 
     #[test]

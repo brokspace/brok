@@ -1,0 +1,12 @@
+flowchart TD
+    A[Brokspace activity bar] --> C[Chat view]
+    A --> O[Workspace view]
+    A --> M[Memory view]
+    A --> L[Linked workspaces view]
+    A --> S[Shards view]
+    A --> K[Skills view]
+    C --> T1[Chat tab]
+    C --> T2[History tab]
+    C --> T3[Settings tab]
+    T3 --> SET[overview, model, search, memory, links, agents, diagnostics, report]
+    CMD[36 commands in the palette] -.-> A

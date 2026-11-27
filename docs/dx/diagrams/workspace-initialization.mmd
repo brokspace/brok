@@ -1,0 +1,20 @@
+%% Today, as observed with brok 0.10.0 (brok init --yes).
+sequenceDiagram
+    actor U as Developer
+    participant C as brok CLI
+    participant W as .brokspace/
+    participant N as Network
+    U->>C: brok init (VS Code runs brok init --yes)
+    C->>W: brok.yml, .gitignore
+    C->>W: copy brok-agent found next to brok or on PATH
+    alt brok-agent not found
+        C-->>U: warning, setup continues without it
+    end
+    C->>N: download the embedding model (about 140 MB)
+    alt download fails
+        C-->>U: warning, text search only
+    end
+    C-->>U: local LLM detection and advice
+    C->>W: full index, search is not usable until it ends
+    C->>U: writes agent files into the repository (.agents, .vscode/mcp.json)
+    C-->>U: "You're set"

@@ -75,10 +75,14 @@ To add a provider: implement `SourceControl`, give it a unique lowercase id and 
 
 Both stores share one Arrow schema (`brok-index/src/schema.rs`): `id`, `path`,
 `language`, `kind`, `symbol`, `parent`, `signature`, line and byte ranges,
-`file_hash`, `content` and an optional `FixedSizeList<Float32>` `vector`.
+`file_hash`, `content` and an optional `FixedSizeList<Float16>` `vector`
+(`Float32` in indexes created by brok 0.10 and earlier, until rebuilt:
+[ADR 0017](adr/0017-compact-vector-storage.md)).
 
 - **LanceDB**: deletes/appends go straight to the table; compaction runs every
-  16 writes and an ANN index is built past 10 000 rows.
+  16 writes and an IVF-PQ index with the cosine metric is built past 10 000
+  rows. Queries re-rank ten times the wanted results with the stored vectors
+  ([measurements](benchmarks.md#vector-index)).
 - **Arrow IPC**: each commit writes a new immutable generation file and flips
   `CURRENT`. Files are memory-mapped and decoded zero-copy; immutability is
   what makes `mmap` sound and lets readers keep an old generation (Windows

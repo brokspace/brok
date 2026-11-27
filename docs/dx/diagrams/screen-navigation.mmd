@@ -1,0 +1,10 @@
+flowchart LR
+    ON[First run checklist] --> CH[Chat]
+    CH -- source --> ED[Editor at the lines]
+    CH -- "Tools menu" --> SE[Search quick pick]
+    CH --> HI[History] --> CH
+    CH -- "model pill" --> MO[Settings: model]
+    CH -- "status line" --> HL[Health and recovery]
+    HL --> LOG[Doctor and logs]
+    CH -- "+ Context" --> CX[Attach file, selection, diff, tabs, folder, problems]
+    CH --> MEM[Memory and skills]

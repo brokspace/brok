@@ -1,0 +1,8 @@
+flowchart TD
+    Q[Question, attached context, recent turns] --> A[brok-agent]
+    I[(Local index)] --> A
+    A --> R[Mask secrets, bound size]
+    R --> P{Provider chosen in brok.yml}
+    P -- local --> L[Ollama or LM Studio on this machine]
+    P -- hosted --> H[Hosted API: this text leaves the machine]
+    S[Search, indexing, memory] --> N[Never leave the machine unless sync is configured]

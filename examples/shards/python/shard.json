@@ -1,0 +1,28 @@
+{
+  "$schema": "https://raw.githubusercontent.com/brokspace/brok-sdk/main/shard.schema.json",
+  "name": "todo-python",
+  "version": "0.1.0",
+  "description": "Example shard in Python: reports TODO and FIXME lines and searches the index",
+  "license": "MIT OR Apache-2.0",
+  "brok": ">=0.8.0, <1.0.0",
+  "entrypoint": "bin/todo-python",
+  "permissions": {
+    "filesystem": {
+      "read": [
+        "."
+      ]
+    },
+    "network": false,
+    "process": [
+      "python3"
+    ]
+  },
+  "subscribes_to": [
+    "file:changed",
+    "todo-python:ask"
+  ],
+  "publishes_to": [
+    "todo-python:*",
+    "index:search"
+  ]
+}
