@@ -87,6 +87,9 @@ single pass. Capping the number of pools (`M_ARENA_MAX`) fixed it too, but made 
 - Search during indexing through the daemon; Windows file locking.
 - Whether 95% is the right threshold, with real questions.
 
+Still unverified: the 95% threshold has not been compared with other values on real questions. It is
+kept for now, and is one constant to change.
+
 ## Consequences
 
 - Text search in seconds, and indexing that can be interrupted.
