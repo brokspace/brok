@@ -760,6 +760,7 @@ dependencies = [
  "hex",
  "ignore",
  "lancedb",
+ "libc",
  "memmap2",
  "ort",
  "postcard",

@@ -18,6 +18,7 @@ use crate::chunk::{Chunk, ChunkOptions, chunk_file};
 use crate::embed::{EmbedKind, Embedder};
 use crate::links::{LinkStatus, LinkedIndex};
 use crate::memory::MemorySearch;
+use crate::os;
 use crate::partition_index::{EmbeddingInfo, FileRecord, MANIFEST_FILE, PartitionIndex};
 
 /// Files read, hashed and chunked per batch (bounds memory on big repos).
@@ -301,6 +302,10 @@ impl Index {
             progress(Progress::Partition { id: self.parts[i].partition.id.clone(), files: candidates.len() });
             self.process(i, candidates, deleted, progress, &mut report).await?;
         }
+        if self.waiting_chunks() > 0 {
+            // Embedding runs next to this process' largest buffers.
+            os::release_freed_memory();
+        }
         report.duration = started.elapsed();
         self.record_index("full", &report);
         Ok(report)
@@ -421,6 +426,7 @@ impl Index {
             part.record(file.rel, record);
         }
         part.save().await?;
+        os::release_freed_memory();
         Ok(saved)
     }
 

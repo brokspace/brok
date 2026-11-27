@@ -55,6 +55,7 @@ regex = { version = "1.11", default-features = false, features = ["std", "perf",
 ignore = "0.4"
 rayon = "1.11"
 memmap2 = "0.9"
+libc = "0.2"
 tempfile = "3.20"
 dirs = "7"
 clap_complete = "4.5"

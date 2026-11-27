@@ -18,6 +18,7 @@ mod index;
 pub mod language;
 mod links;
 mod memory;
+mod os;
 pub mod partition_index;
 pub mod schema;
 mod search;
