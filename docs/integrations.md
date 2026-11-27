@@ -70,7 +70,7 @@ Editor extensions, scripts and CI read brok through
 
 | Command | Output |
 |---|---|
-| `brok status --json` | One document: `version`, `initialized`, `root`, `daemon.running`, `backends`, `embeddings`, `llm` (`provider`, `model`, `base_url`), `index[]` (`tier`, `path`, `files`, `chunks`, `backend`, `semantic`), `shards[]` (`name`, `version`, `description`, `state`, `source`), `links[]` (as `brok link list --json`), `memory` (`enabled`, `sessions`, `global`, `counts.private`, `counts.shared`, `counts.global`). Outside a workspace: `{"version": ..., "initialized": false}`. |
+| `brok status --json` | One document: `version`, `initialized`, `root`, `daemon.running`, `backends`, `embeddings`, `llm` (`provider`, `model`, `base_url`), `index[]` (`tier`, `path`, `files`, `chunks`, `backend`, `semantic`, `embedded`, `waiting`), `readiness` ([below](#readiness)), `shards[]` (`name`, `version`, `description`, `state`, `source`), `links[]` (as `brok link list --json`), `memory` (`enabled`, `sessions`, `global`, `counts.private`, `counts.shared`, `counts.global`). Outside a workspace: `{"version": ..., "initialized": false}`. |
 | `brok search <query> --json` | One document: `hits[]` with `path`, `start_line`, `end_line`, `kind`, `symbol`, `score`, `content`, `partition` (`@<link>` for linked workspaces, `memory` for memories). |
 | `brok skill list --json` | One array: `name`, `description`, `user_invoked`, `source`, `bucket` per skill. |
 | `brok memory list --json` | One array of memories: `id`, `title`, `kind`, `scope`, `tags`, `created`, `updated`, `source`, `body`, `path`. `brok memory add/show ... --json` print one. |
@@ -82,6 +82,35 @@ Editor extensions, scripts and CI read brok through
 | `brok bug --json --title ... [--what-happened ...] [--repo brok\|brok-agent] [--context ...]` | One document: `repo`, `url` (the prefilled issue form, to open in a browser), `file` (the saved report), `report` (Markdown, secrets masked). Opens nothing. |
 | `brok config get [key] --json` | The configuration (or one key) as JSON; change it with `brok config set <key> <value>`. |
 | `brok ask ... --json`, `brok review --json`, `brok skill run ... --json` | A stream, one JSON event per line (see below). |
+
+### Readiness
+
+`status --json` says what works and the one thing to do next, so an editor never reads error text:
+
+```json
+"readiness": {
+  "text_search": { "state": "ready" },
+  "meaning_search": { "state": "embedding", "embedded": 620, "chunks": 1500 },
+  "agent": { "state": "stopped" },
+  "model": { "state": "unreachable" },
+  "next_action": { "code": "finish_indexing", "command": "brok index" }
+}
+```
+
+| Field | States |
+|---|---|
+| `text_search` | `ready`, `not_indexed`, `empty`, `unreadable` (then `index` is empty) |
+| `meaning_search` | `ready`, `embedding`, `not_built`, `no_model`, `unsupported` (this build), `disabled` |
+| `agent` | `ready`, `stopped`, `starting`, `not_connected`, `disabled`, `not_installed`, `missing_program`, `incompatible` |
+| `model` (LLM) | `ready`, `unreachable`, `not_installed`, `missing_key`, `not_configured`, `unchecked` |
+
+`next_action` is `null` when there is nothing to suggest. Its `code` is one of `rebuild_index`,
+`download_embedding_model`, `index_workspace`, `finish_indexing`, `restart`, `install_agent`,
+`repair_agent`, `upgrade`, `check_logs`, `set_api_key` (no `command`), `pull_model`, `setup_model` or
+`start`. Treat a state or code you do not know as "see `brok doctor`".
+
+Only a model server on this machine is contacted (for at most 1.5 s). A server elsewhere is
+`unchecked`, unless its key variable is not set.
 
 Streaming events:
 

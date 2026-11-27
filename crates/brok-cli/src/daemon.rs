@@ -140,20 +140,25 @@ pub async fn connect_or_start(workspace: &Workspace) -> Result<(BrokClient, Inbo
 
 /// Why `brok-agent` may be missing from the bus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AgentState {
+pub enum AgentState {
     Disabled,
     NotInstalled,
     NoBinary,
+    /// Made for another brok version.
+    Incompatible,
     NotConnected,
 }
 
 impl AgentState {
-    fn of(workspace: &Workspace) -> Self {
+    pub fn of(workspace: &Workspace) -> Self {
         if !workspace.config().shard_enabled(SYSTEM_AGENT) {
             return Self::Disabled;
         }
         match Registry::new(workspace.paths()).get(SYSTEM_AGENT) {
-            Ok(Some(agent)) if agent.is_runnable() => Self::NotConnected,
+            Ok(Some(agent)) if agent.is_runnable() => match brok_shard::install::check_compatible(&agent.manifest) {
+                Ok(()) => Self::NotConnected,
+                Err(_) => Self::Incompatible,
+            },
             Ok(Some(_)) => Self::NoBinary,
             _ => Self::NotInstalled,
         }
@@ -170,6 +175,9 @@ fn nobody_answers(agent: AgentState) -> String {
             "brok-agent is not installed. Put it next to brok (the install script does), run `brok init`, then `brok restart`"
         }
         AgentState::NoBinary => "the brok-agent program is missing. Run `brok init`, then `brok restart`",
+        AgentState::Incompatible => {
+            "brok-agent was made for another brok version. Run `brok upgrade`, then `brok restart`"
+        }
         AgentState::NotConnected => {
             "brok-agent is installed but not connected. See why with `brok logs`, then run `brok restart`"
         }

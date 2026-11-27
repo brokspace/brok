@@ -6,12 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `brok status --json` reports `readiness`: whether keyword and meaning search, the agent and the model are ready, with one suggested next action and a stable code for it, so editors need not read error text. Only a model server on this machine is contacted (brokspace/brok#201).
+
 ### Changed
 
 - Search works within seconds on a new workspace: indexing first stores the text and keyword index, then computes vectors, saving about once a minute. Interrupting keeps what is done and the next run continues. A partition is searched by meaning once 95% of it has vectors, and `brok status` and `brok doctor` show the progress. The daemon answers searches while embedding and takes over from a `brok index` running beside it. On Linux, memory freed between the passes is handed back to the system, so the peak stays close to a single pass. New and rebuilt indexes work this way; brok 0.11 and earlier rebuild them (brokspace/brok#200, ADR 0018).
 
 ### Fixed
 
+- `brok status --json` reports an index it cannot read, with `brok index --rebuild` as the next step, instead of failing (brokspace/brok#201).
 - A command run in the moment a daemon is starting waits for it instead of failing with "cannot read .../operator.token", or with an invalid token left behind by a daemon that crashed.
 
 ## [0.11.0] - 2026-11-27
