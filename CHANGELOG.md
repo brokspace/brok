@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Search works within seconds on a new workspace: indexing first stores the text and keyword index, then computes vectors, saving about once a minute. Interrupting keeps what is done and the next run continues. A partition is searched by meaning once 95% of it has vectors, and `brok status` and `brok doctor` show the progress. The daemon answers searches while embedding and takes over from a `brok index` running beside it. On Linux, memory freed between the passes is handed back to the system, so the peak stays close to a single pass. New and rebuilt indexes work this way; brok 0.11 and earlier rebuild them (brokspace/brok#200, ADR 0018).
+
 ## [0.11.0] - 2026-11-27
 
 ### Added
@@ -15,7 +19,6 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- Search works within seconds on a new workspace: indexing first stores the text and keyword index, then computes vectors, saving about once a minute. Interrupting keeps what is done and the next run continues. A partition is searched by meaning once 95% of it has vectors, and `brok status` and `brok doctor` show the progress. The daemon answers searches while embedding and takes over from a `brok index` running beside it. On Linux, memory freed between the passes is handed back to the system, so the peak stays close to a single pass. New and rebuilt indexes work this way; brok 0.11 and earlier rebuild them (brokspace/brok#200, ADR 0018).
 - New indexes store vectors as `float16`: about 35% (Arrow) to 49% (LanceDB) less disk for the chunk store, with the same search results in our measurements. Existing indexes keep working and are not rebuilt; `brok index --rebuild` converts one. brok 0.10 and earlier rebuild an index made this way (brokspace/brok#73, ADR 0017).
 
 ### Fixed
