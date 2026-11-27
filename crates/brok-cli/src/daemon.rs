@@ -6,7 +6,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use brok_core::Workspace;
-use brok_sdk::{BrokClient, ConnectOptions, Inbox, Payload, transport};
+use brok_sdk::frame::ErrorCode;
+use brok_sdk::{BrokClient, ClientError, ConnectOptions, Inbox, Payload, transport};
 use brok_shard::{Registry, SYSTEM_AGENT};
 use serde::{Deserialize, Serialize};
 
@@ -52,6 +53,9 @@ pub const INDEX_SERVICE: &str = "brok-index";
 /// How long to wait for a starting daemon.
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// A daemon listens a moment before it has written its operator token.
+const TOKEN_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Whether `brok run` is serving this workspace.
 pub async fn is_running(workspace: &Workspace) -> bool {
     transport::is_listening(&workspace.endpoint()).await
@@ -67,14 +71,35 @@ pub async fn connect(workspace: &Workspace) -> Result<(BrokClient, Inbox)> {
 
 /// Connects without waiting for the daemon to finish starting.
 async fn connect_now(workspace: &Workspace) -> Result<(BrokClient, Inbox)> {
-    if !is_running(workspace).await {
-        bail!("brok is not running in this workspace. Start it with `brok start` (or `brok run` in a terminal)");
+    let deadline = Instant::now() + TOKEN_TIMEOUT;
+    loop {
+        if !is_running(workspace).await {
+            bail!("brok is not running in this workspace. Start it with `brok start` (or `brok run` in a terminal)");
+        }
+        let token_file = workspace.paths().operator_token();
+        // No token yet, or the one a daemon that crashed left behind.
+        let early = match std::fs::read_to_string(&token_file) {
+            Ok(token) => {
+                let options = ConnectOptions::new("brok-cli", env!("CARGO_PKG_VERSION"), token.trim());
+                match BrokClient::connect(&workspace.endpoint(), options).await {
+                    Err(e @ ClientError::Rejected { code: ErrorCode::Unauthorized, .. }) => {
+                        anyhow::Error::new(e).context("connecting to the brok event bus")
+                    }
+                    result => return result.context("connecting to the brok event bus"),
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                anyhow::Error::new(e).context(format!("cannot read {} (is `brok run` running?)", token_file.display()))
+            }
+            Err(e) => {
+                return Err(e).with_context(|| format!("cannot read {}", token_file.display()));
+            }
+        };
+        if Instant::now() >= deadline {
+            return Err(early);
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    let token_file = workspace.paths().operator_token();
-    let token = std::fs::read_to_string(&token_file)
-        .with_context(|| format!("cannot read {} (is `brok run` running?)", token_file.display()))?;
-    let options = ConnectOptions::new("brok-cli", env!("CARGO_PKG_VERSION"), token.trim());
-    BrokClient::connect(&workspace.endpoint(), options).await.context("connecting to the brok event bus")
 }
 
 /// Waits until none of `services` is still starting. Gives up quietly after
@@ -382,6 +407,35 @@ mod tests {
         let (client, _inbox) = connect(&workspace).await.unwrap();
         let request = SearchRequest::new("anything");
         client.call::<SearchRequest, SearchResults>(&request, Duration::from_secs(5)).await.unwrap();
+        shutdown.cancel();
+    }
+
+    #[tokio::test]
+    async fn a_command_waits_for_the_token_of_a_starting_daemon() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".brokspace/run")).unwrap();
+        std::fs::write(dir.path().join(".brokspace/brok.yml"), "version: 1\n").unwrap();
+        let workspace = Workspace::open(dir.path()).unwrap();
+        let token_file = workspace.paths().operator_token();
+        let shutdown = CancellationToken::new();
+        let bus = Bus::start(workspace.endpoint(), shutdown.clone()).unwrap();
+        let context = brok_sdk::frame::ShardContext {
+            workspace_root: dir.path().to_path_buf(),
+            settings: serde_json::Value::Null,
+            llm: serde_json::Value::Null,
+            members: Vec::new(),
+        };
+        let operator = bus.authenticator().issue(Grant::operator(context));
+
+        // Listening with nothing, then with a crashed daemon's token.
+        let writer = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            std::fs::write(&token_file, "left behind").unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            std::fs::write(&token_file, operator.expose()).unwrap();
+        });
+        super::connect_now(&workspace).await.unwrap();
+        writer.await.unwrap();
         shutdown.cancel();
     }
 
