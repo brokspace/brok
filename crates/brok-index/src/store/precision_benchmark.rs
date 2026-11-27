@@ -16,7 +16,7 @@ use brok_core::config::StoreBackend;
 
 use super::{ChunkStore, arrow::ArrowStore};
 use crate::chunk::Chunk;
-use crate::schema::{Precision, tests::sample};
+use crate::schema::{Precision, VectorFormat, tests::sample};
 
 const DIMS: usize = 768;
 const K: usize = 32;
@@ -52,12 +52,14 @@ fn size(dir: &Path) -> u64 {
 async fn open(dir: &Path, backend: StoreBackend, precision: Precision) -> ChunkStore {
     match backend {
         #[cfg(feature = "lancedb")]
-        StoreBackend::Lancedb => {
-            ChunkStore::Lance(super::lance::LanceStore::open_as(dir, Some(DIMS), precision).await.expect("lance"))
-        }
+        StoreBackend::Lancedb => ChunkStore::Lance(
+            super::lance::LanceStore::open_as(dir, Some(DIMS), VectorFormat { precision, optional: false })
+                .await
+                .expect("lance"),
+        ),
         _ => {
             let mut store = ArrowStore::open(dir, Some(DIMS)).expect("arrow");
-            store.set_precision(precision);
+            store.set_format(VectorFormat { precision, optional: false });
             ChunkStore::Arrow(store)
         }
     }

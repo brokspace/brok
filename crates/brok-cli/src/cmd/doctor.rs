@@ -149,7 +149,17 @@ async fn check_workspace(workspace: &Workspace, report: &mut Report) {
             let files: usize = parts.iter().map(|p| p.files).sum();
             let chunks: usize = parts.iter().map(|p| p.chunks).sum();
             let mode = if parts.iter().any(|p| p.semantic) { "hybrid" } else { "text only" };
-            report.line(Status::Ok, "index", &format!("{files} files, {chunks} chunks ({mode})"), None);
+            let waiting: usize = parts.iter().map(|p| p.waiting).sum();
+            if waiting > 0 {
+                report.line(
+                    Status::Warn,
+                    "index",
+                    &format!("{files} files, {chunks} chunks ({mode}); {waiting} still to embed"),
+                    Some("brok index   (or leave brok running: it carries on)"),
+                );
+            } else {
+                report.line(Status::Ok, "index", &format!("{files} files, {chunks} chunks ({mode})"), None);
+            }
         }
         Ok(_) => report.line(Status::Warn, "index", "empty", Some("brok index")),
         Err(e) => report.line(Status::Fail, "index", &format!("{e:#}"), Some("brok index --rebuild")),

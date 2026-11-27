@@ -55,6 +55,7 @@ regex = { version = "1.11", default-features = false, features = ["std", "perf",
 ignore = "0.4"
 rayon = "1.11"
 memmap2 = "0.9"
+libc = "0.2"
 tempfile = "3.20"
 dirs = "7"
 clap_complete = "4.5"
@@ -66,6 +67,7 @@ arrow-array = "58"
 arrow-buffer = "58"
 arrow-ipc = "58"
 arrow-schema = "58"
+chrono = { version = "0.4", default-features = false }
 half = "2.7"
 # `remote` is required only because lancedb 0.40 references `Error::Http`
 # outside its feature gate (src/job.rs); drop it once fixed upstream.

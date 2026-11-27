@@ -26,6 +26,9 @@ const MANIFEST_VERSION: u32 = 1;
 /// Manifest of a partition with `Float16` vectors. brok 0.10 and earlier do
 /// not know it, so they rebuild the partition instead of finding no vectors.
 const HALF_VECTORS_VERSION: u32 = 2;
+/// Manifest of a partition whose rows may wait for their vectors (ADR 0018).
+/// brok 0.11 and earlier rebuild it.
+const PENDING_VECTORS_VERSION: u32 = 3;
 
 /// Embedding settings an index was built with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,6 +50,9 @@ pub struct FileRecord {
     pub modified: u64,
     /// Number of chunks produced.
     pub chunks: u32,
+    /// The chunks are stored without vectors, which are still to be computed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pending: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,7 +101,7 @@ impl PartitionIndex {
 
         let manifest = match stored {
             Some(m)
-                if matches!(m.version, MANIFEST_VERSION | HALF_VECTORS_VERSION)
+                if matches!(m.version, MANIFEST_VERSION | HALF_VECTORS_VERSION | PENDING_VECTORS_VERSION)
                     && m.backend == expected.backend
                     && m.embedding == expected.embedding =>
             {
@@ -134,11 +140,37 @@ impl PartitionIndex {
         self.manifest.files.remove(path);
     }
 
+    /// Whether chunks can be stored first and get their vectors later.
+    pub fn defers_vectors(&self) -> bool {
+        self.store.dims().is_some() && self.store.format().optional
+    }
+
+    /// Chunks recorded in the manifest, and how many of them still wait for a
+    /// vector.
+    pub fn chunk_counts(&self) -> (usize, usize) {
+        self.manifest.files.values().fold((0, 0), |(all, waiting), file| {
+            let chunks = file.chunks as usize;
+            (all + chunks, waiting + if file.pending { chunks } else { 0 })
+        })
+    }
+
+    /// Whether searches use this partition's vectors: at least 95% of its
+    /// chunks have one. Ranking a partly embedded partition by meaning would
+    /// favour whatever was embedded first.
+    pub fn searches_by_meaning(&self) -> bool {
+        let (chunks, waiting) = self.chunk_counts();
+        self.store.dims().is_some() && waiting.saturating_mul(20) <= chunks
+    }
+
     /// Commits the store and persists BM25 and the manifest.
     pub async fn save(&mut self) -> Result<()> {
         self.store.commit().await?;
-        let half = self.store.dims().is_some() && self.store.precision() == Precision::Half;
-        self.manifest.version = if half { HALF_VECTORS_VERSION } else { MANIFEST_VERSION };
+        let format = self.store.format();
+        self.manifest.version = match self.store.dims() {
+            Some(_) if format.optional => PENDING_VECTORS_VERSION,
+            Some(_) if format.precision == Precision::Half => HALF_VECTORS_VERSION,
+            _ => MANIFEST_VERSION,
+        };
         self.bm25.save(&self.dir.join(BM25_FILE))?;
         let json = serde_json::to_vec_pretty(&self.manifest)?;
         brok_core::fsutil::write_atomic(&self.dir.join(MANIFEST_FILE), &json)?;
@@ -169,6 +201,7 @@ mod tests {
     use brok_core::{PartitionMap, Workspace};
 
     use super::*;
+    use crate::schema::VectorFormat;
     use crate::schema::tests::sample;
 
     #[tokio::test]
@@ -186,28 +219,29 @@ mod tests {
             serde_json::from_slice::<Manifest>(&bytes).unwrap().version
         };
 
-        // What brok 0.10 wrote: version 1 and `Float32` vectors.
+        // What brok 0.10 wrote: version 1 and required `Float32` vectors.
         let mut old = open().await.unwrap();
         // Irrefutable in builds without LanceDB.
         #[allow(irrefutable_let_patterns)]
         let ChunkStore::Arrow(store) = &mut old.store else { unreachable!("the arrow backend") };
-        store.set_precision(Precision::Single);
+        store.set_format(VectorFormat { precision: Precision::Single, optional: false });
         old.store.append(&[sample("a1", "a.rs")], Some(&[vec![1.0, 0.0]])).await.unwrap();
-        old.record("a.rs".into(), FileRecord { hash: "h".into(), size: 1, modified: 1, chunks: 1 });
+        old.record("a.rs".into(), FileRecord { hash: "h".into(), size: 1, modified: 1, chunks: 1, pending: false });
         old.save().await.unwrap();
         assert_eq!(version(), 1);
 
         let mut kept = open().await.unwrap();
-        assert_eq!((kept.files().len(), kept.store.precision()), (1, Precision::Single), "not rebuilt");
+        assert_eq!((kept.files().len(), kept.store.format().precision), (1, Precision::Single), "not rebuilt");
+        assert!(!kept.defers_vectors(), "its table requires them");
         kept.save().await.unwrap();
         assert_eq!(version(), 1);
 
         kept.reset(StoreBackend::Arrow).await.unwrap();
         kept.store.append(&[sample("a1", "a.rs")], Some(&[vec![1.0, 0.0]])).await.unwrap();
-        kept.record("a.rs".into(), FileRecord { hash: "h".into(), size: 1, modified: 1, chunks: 1 });
+        kept.record("a.rs".into(), FileRecord { hash: "h".into(), size: 1, modified: 1, chunks: 1, pending: false });
         kept.save().await.unwrap();
-        assert_eq!(version(), 2);
+        assert_eq!(version(), 3);
         let reopened = open().await.unwrap();
-        assert_eq!((reopened.files().len(), reopened.store.precision()), (1, Precision::Half));
+        assert_eq!((reopened.files().len(), reopened.store.format()), (1, VectorFormat::default()));
     }
 }

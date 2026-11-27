@@ -18,12 +18,22 @@ use crate::chunk::{Chunk, ChunkOptions, chunk_file};
 use crate::embed::{EmbedKind, Embedder};
 use crate::links::{LinkStatus, LinkedIndex};
 use crate::memory::MemorySearch;
-use crate::partition_index::{EmbeddingInfo, FileRecord, PartitionIndex};
+use crate::os;
+use crate::partition_index::{EmbeddingInfo, FileRecord, MANIFEST_FILE, PartitionIndex};
 
 /// Files read, hashed and chunked per batch (bounds memory on big repos).
 const FILE_BATCH: usize = 512;
 /// Chunks embedded and appended per batch.
 const CHUNK_BATCH: usize = 256;
+/// How often the vector pass saves what it embedded (ADR 0018).
+const CHECKPOINT: Duration = Duration::from_secs(60);
+/// A save may take at most this fraction (1 / n) of the time between saves.
+const SAVE_SHARE: u32 = 50;
+/// Fewest and most chunks embedded between two saves.
+const MIN_JOB: usize = 64;
+const MAX_JOB: usize = 4096;
+/// Replaced data younger than this is kept: a reader may still be using it.
+const KEEP_REPLACED: Duration = Duration::from_secs(10 * 60);
 
 /// How the index is opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +55,19 @@ pub enum Progress {
         id: String,
         /// Files to process.
         files: usize,
+    },
+    /// Every change is searchable by keywords; `waiting` chunks still have to
+    /// be embedded.
+    TextReady {
+        /// Chunks without a vector yet.
+        waiting: usize,
+    },
+    /// Chunks embedded and saved so far.
+    Vectors {
+        /// Saved.
+        done: usize,
+        /// Waiting when this pass started.
+        total: usize,
     },
     /// Files processed so far in the current partition.
     Files {
@@ -96,10 +119,93 @@ pub struct PartitionStatus {
     pub backend: &'static str,
     /// Indexed files.
     pub files: usize,
-    /// Stored chunks.
+    /// Indexed chunks.
     pub chunks: usize,
-    /// Whether chunks carry embeddings.
+    /// Chunks that have their vector (0 without semantic search).
+    pub embedded: usize,
+    /// Chunks still waiting for their vector.
+    pub waiting: usize,
+    /// Whether searches use the vectors: enough chunks have one.
     pub semantic: bool,
+}
+
+/// Embeds some waiting files. It borrows nothing from the index, so searches
+/// go on while it runs; [`Index::save_vectors`] applies the result.
+pub struct VectorJob {
+    partition: usize,
+    /// Path and the content hash the index has for it.
+    files: Vec<(String, String)>,
+    root: PathBuf,
+    embedder: Arc<dyn Embedder>,
+    options: ChunkOptions,
+    max_bytes: u64,
+}
+
+/// What a [`VectorJob`] computed.
+pub struct VectorBatch {
+    partition: usize,
+    files: Vec<EmbeddedFile>,
+}
+
+/// A waiting file as it is on disk now: path, expected hash and content.
+type ReadFile = (String, String, Option<(FileRecord, Vec<Chunk>)>);
+
+struct EmbeddedFile {
+    rel: String,
+    /// The hash the index had when the job was made.
+    expected: String,
+    /// `None` when the file is gone or no longer indexable.
+    content: Option<(FileRecord, Vec<Chunk>, Vec<Vec<f32>>)>,
+}
+
+impl VectorJob {
+    /// Reads, chunks and embeds the files.
+    pub async fn run(self) -> Result<VectorBatch> {
+        let VectorJob { partition, files, root, embedder, options, max_bytes } = self;
+        tokio::task::spawn_blocking(move || {
+            let read: Vec<ReadFile> = files
+                .into_iter()
+                .map(|(rel, expected)| {
+                    let outcome = FileMeta::stat(&root, &rel)
+                        .map(|file| read_and_chunk(file, &HashMap::new(), max_bytes, options));
+                    let content = match outcome {
+                        Some(Outcome::Chunked { record, chunks, .. }) => Some((record, chunks)),
+                        _ => None,
+                    };
+                    (rel, expected, content)
+                })
+                .collect();
+            // Embedded together, whatever file they come from: batches stay full.
+            let texts: Vec<String> = read
+                .iter()
+                .filter_map(|(_, _, content)| content.as_ref())
+                .flat_map(|(_, chunks)| chunks.iter().map(Chunk::embedding_text))
+                .collect();
+            let mut vectors = Vec::with_capacity(texts.len());
+            for group in texts.chunks(CHUNK_BATCH) {
+                vectors.extend(embedder.embed(group, EmbedKind::Document)?);
+            }
+            anyhow::ensure!(
+                vectors.len() == texts.len(),
+                "the model returned {} vectors for {} texts",
+                vectors.len(),
+                texts.len()
+            );
+            let mut vectors = vectors.into_iter();
+            let out = read
+                .into_iter()
+                .map(|(rel, expected, content)| {
+                    let content = content.map(|(record, chunks)| {
+                        let own = vectors.by_ref().take(chunks.len()).collect();
+                        (record, chunks, own)
+                    });
+                    EmbeddedFile { rel, expected, content }
+                })
+                .collect();
+            Ok(VectorBatch { partition, files: out })
+        })
+        .await?
+    }
 }
 
 /// The index of a whole workspace.
@@ -115,6 +221,7 @@ pub struct Index {
     /// Local metrics of this workspace (`brok stats`).
     pub(crate) metrics: brok_core::metrics::Recorder,
     filter: FileFilter,
+    checkpoint: Duration,
     _lock: Option<File>,
 }
 
@@ -159,13 +266,25 @@ impl Index {
             links: tokio::sync::Mutex::new(links),
             memory,
             metrics,
+            checkpoint: CHECKPOINT,
             _lock: lock,
         })
     }
 
     /// Indexes the whole workspace incrementally (or from scratch with
-    /// `rebuild`).
+    /// `rebuild`): first the text of every change, then the vectors, saved
+    /// as they are computed. Interrupted, it resumes where it stopped.
     pub async fn index_all(&mut self, rebuild: bool, progress: &(dyn Fn(Progress) + Sync)) -> Result<IndexReport> {
+        let started = Instant::now();
+        let mut report = self.index_text(rebuild, progress).await?;
+        self.fill_vectors(progress).await?;
+        report.duration = started.elapsed();
+        Ok(report)
+    }
+
+    /// The first pass of [`Self::index_all`]: afterwards every change is
+    /// found by keywords, and chunks may wait for their vectors.
+    pub async fn index_text(&mut self, rebuild: bool, progress: &(dyn Fn(Progress) + Sync)) -> Result<IndexReport> {
         let started = Instant::now();
         if rebuild {
             for part in &mut self.parts {
@@ -182,6 +301,10 @@ impl Index {
             }
             progress(Progress::Partition { id: self.parts[i].partition.id.clone(), files: candidates.len() });
             self.process(i, candidates, deleted, progress, &mut report).await?;
+        }
+        if self.waiting_chunks() > 0 {
+            // Embedding runs next to this process' largest buffers.
+            os::release_freed_memory();
         }
         report.duration = started.elapsed();
         self.record_index("full", &report);
@@ -226,8 +349,149 @@ impl Index {
         Ok((scanned, work))
     }
 
+    /// Chunks waiting for a vector, in every partition.
+    pub fn waiting_chunks(&self) -> usize {
+        if self.embedder.is_none() {
+            return 0;
+        }
+        self.parts.iter().map(|part| part.chunk_counts().1).sum()
+    }
+
+    /// The next files to embed, about `max_chunks` chunks of one partition;
+    /// `None` when nothing waits.
+    pub fn vector_job(&self, max_chunks: usize) -> Option<VectorJob> {
+        let embedder = self.embedder.clone()?;
+        for (partition, part) in self.parts.iter().enumerate() {
+            if !part.defers_vectors() {
+                continue;
+            }
+            let mut chunks = 0;
+            let mut files = Vec::new();
+            for (rel, record) in part.files().iter().filter(|(_, record)| record.pending) {
+                chunks += record.chunks as usize;
+                files.push((rel.clone(), record.hash.clone()));
+                if chunks >= max_chunks {
+                    break;
+                }
+            }
+            if !files.is_empty() {
+                return Some(VectorJob {
+                    partition,
+                    files,
+                    root: self.root.clone(),
+                    embedder,
+                    options: ChunkOptions { max_lines: self.config.index.max_chunk_lines },
+                    max_bytes: self.config.index.max_file_kb * 1024,
+                });
+            }
+        }
+        None
+    }
+
+    /// Stores what a job computed and returns the chunks that got a vector.
+    /// A file indexed again since the job was made is left for a later one.
+    pub async fn save_vectors(&mut self, batch: VectorBatch) -> Result<usize> {
+        let part = &mut self.parts[batch.partition];
+        let mut replaced = Vec::new();
+        let mut apply = Vec::new();
+        for file in batch.files {
+            let current = part.files().get(&file.rel).is_some_and(|r| r.pending && r.hash == file.expected);
+            if current {
+                replaced.push(file.rel.clone());
+                apply.push(file);
+            }
+        }
+        if apply.is_empty() {
+            return Ok(0);
+        }
+        part.store.delete_paths(&replaced).await?;
+        let mut saved = 0;
+        for file in apply {
+            let Some((record, chunks, vectors)) = file.content else {
+                part.bm25.remove_path(&file.rel);
+                part.forget(&file.rel);
+                continue;
+            };
+            // Edited since the text pass: its keywords changed too.
+            if record.hash != file.expected {
+                part.bm25.remove_path(&file.rel);
+                for chunk in &chunks {
+                    part.bm25.add(&chunk.id, &chunk.path, &chunk.embedding_text());
+                }
+            }
+            for (group, vectors) in chunks.chunks(CHUNK_BATCH).zip(vectors.chunks(CHUNK_BATCH)) {
+                part.store.append(group, Some(vectors)).await?;
+            }
+            saved += chunks.len();
+            part.record(file.rel, record);
+        }
+        part.save().await?;
+        os::release_freed_memory();
+        Ok(saved)
+    }
+
+    /// The second pass of [`Self::index_all`]: embeds everything waiting,
+    /// saving about once a minute.
+    pub async fn fill_vectors(&mut self, progress: &(dyn Fn(Progress) + Sync)) -> Result<()> {
+        let total = self.waiting_chunks();
+        if total == 0 {
+            return Ok(());
+        }
+        progress(Progress::TextReady { waiting: total });
+        let mut pace = Pace::new(self.checkpoint);
+        let mut done = 0;
+        while let Some(job) = self.vector_job(pace.chunks) {
+            let started = Instant::now();
+            let batch = job.run().await?;
+            let embedding = started.elapsed();
+            let saving = Instant::now();
+            let saved = self.save_vectors(batch).await?;
+            pace.record(saved, embedding, saving.elapsed());
+            done += saved;
+            progress(Progress::Vectors { done: done.min(total), total });
+        }
+        self.prune_replaced().await;
+        Ok(())
+    }
+
+    /// Frees the space of rows replaced a while ago. Failing costs disk only.
+    pub async fn prune_replaced(&mut self) {
+        for part in &mut self.parts {
+            if let Err(e) = part.store.prune(KEEP_REPLACED).await {
+                tracing::warn!(partition = %part.partition.id, error = %e, "cannot remove replaced index data");
+            }
+        }
+    }
+
+    pub(crate) fn pace(&self) -> Pace {
+        Pace::new(self.checkpoint)
+    }
+
+    /// When any partition was last saved to disk: a reader holding an older
+    /// snapshot opens the index again.
+    pub fn saved_at(paths: &WorkspacePaths) -> Option<std::time::SystemTime> {
+        let manifest = |dir: PathBuf| std::fs::metadata(dir.join(MANIFEST_FILE)).and_then(|m| m.modified()).ok();
+        let nested = std::fs::read_dir(paths.databases.join("hot")).into_iter().flatten().flatten();
+        std::iter::once(paths.databases.join("cold")).chain(nested.map(|e| e.path())).filter_map(manifest).max()
+    }
+
+    /// Saves vectors this often instead of about once a minute (tests).
+    #[doc(hidden)]
+    pub fn set_checkpoint(&mut self, interval: Duration) {
+        self.checkpoint = interval;
+    }
+
     /// Applies a set of workspace relative changes (from `file:changed`).
     pub async fn apply_changes(&mut self, changed: &[String], deleted: &[String]) -> Result<IndexReport> {
+        let mut report = self.apply_changes_text(changed, deleted).await?;
+        let started = Instant::now();
+        self.fill_vectors(&|_| {}).await?;
+        report.duration += started.elapsed();
+        Ok(report)
+    }
+
+    /// [`Self::apply_changes`] without computing the vectors.
+    pub async fn apply_changes_text(&mut self, changed: &[String], deleted: &[String]) -> Result<IndexReport> {
         let started = Instant::now();
         let mut report = IndexReport::default();
         let mut work: HashMap<usize, (Vec<FileMeta>, Vec<String>)> = HashMap::new();
@@ -274,14 +538,19 @@ impl Index {
     pub async fn status(&self) -> Result<Vec<PartitionStatus>> {
         let mut out = Vec::with_capacity(self.parts.len());
         for part in &self.parts {
+            // The manifest is what is indexed; a store may hold rows of an
+            // interrupted run until the next one replaces them.
+            let (chunks, waiting) = part.chunk_counts();
             out.push(PartitionStatus {
                 id: part.partition.id.clone(),
                 path: part.partition.path.clone(),
                 tier: part.partition.tier,
                 backend: part.store.backend_name(),
                 files: part.files().len(),
-                chunks: part.store.count().await?,
-                semantic: part.store.dims().is_some(),
+                chunks,
+                embedded: if part.store.dims().is_some() { chunks - waiting } else { 0 },
+                waiting: if part.store.dims().is_some() { waiting } else { 0 },
+                semantic: part.searches_by_meaning(),
             });
         }
         Ok(out)
@@ -377,15 +646,19 @@ impl Index {
                     self.parts[i].bm25.remove_path(path);
                 }
             }
+            // A store that allows it gets the text now and the vectors in
+            // the second pass.
+            let defer = self.embedder.is_some() && self.parts[i].defers_vectors();
             for group in chunks.chunks(CHUNK_BATCH) {
-                let vectors = self.embed_documents(group).await?;
+                let vectors = if defer { None } else { self.embed_documents(group).await? };
                 self.parts[i].store.append(group, vectors.as_deref()).await?;
                 for chunk in group {
                     self.parts[i].bm25.add(&chunk.id, &chunk.path, &chunk.embedding_text());
                 }
             }
             report.chunks += chunks.len();
-            for (rel, record) in records {
+            for (rel, mut record) in records {
+                record.pending = defer && record.chunks > 0;
                 self.parts[i].record(rel, record);
             }
             progress(Progress::Files { done, total });
@@ -399,6 +672,29 @@ impl Index {
         let texts: Vec<String> = chunks.iter().map(Chunk::embedding_text).collect();
         let vectors = tokio::task::spawn_blocking(move || embedder.embed(&texts, EmbedKind::Document)).await??;
         Ok(Some(vectors))
+    }
+}
+
+/// How many chunks to embed before the next save: about `checkpoint` worth
+/// of work, longer when saving is slow (a large Arrow store).
+pub(crate) struct Pace {
+    checkpoint: Duration,
+    pub(crate) chunks: usize,
+}
+
+impl Pace {
+    pub(crate) fn new(checkpoint: Duration) -> Self {
+        Self { checkpoint, chunks: MIN_JOB }
+    }
+
+    pub(crate) fn record(&mut self, saved: usize, embedding: Duration, saving: Duration) {
+        // A zero checkpoint (tests) saves as often as it can.
+        let spaced = if self.checkpoint.is_zero() { Duration::ZERO } else { saving * SAVE_SHARE };
+        let interval = self.checkpoint.max(spaced);
+        let per_second = saved as f64 / embedding.as_secs_f64().max(0.001);
+        // Grows at most four times at once: the first measure is rough.
+        let wanted = (per_second * interval.as_secs_f64()) as usize;
+        self.chunks = wanted.clamp(MIN_JOB, MAX_JOB.min(self.chunks * 4));
     }
 }
 
@@ -539,10 +835,16 @@ fn read_and_chunk(
         return Outcome::Skipped { rel: file.rel }; // binary
     }
     let hash = hex::encode(Sha256::digest(&bytes));
-    let record = |chunks: u32| FileRecord { hash: hash.clone(), size: file.size, modified: file.modified, chunks };
+    let record = |chunks: u32| FileRecord {
+        hash: hash.clone(),
+        size: file.size,
+        modified: file.modified,
+        chunks,
+        pending: false,
+    };
     if let Some(old) = previous.get(&file.rel).filter(|old| old.hash == hash) {
         // Touched but identical: only refresh the stat data.
-        return Outcome::Unchanged { record: record(old.chunks), rel: file.rel };
+        return Outcome::Unchanged { record: FileRecord { pending: old.pending, ..record(old.chunks) }, rel: file.rel };
     }
     let Ok(text) = String::from_utf8(bytes) else { return Outcome::Skipped { rel: file.rel } };
     let chunks = chunk_file(&file.rel, &text, &hash, options);
@@ -555,4 +857,28 @@ fn is_shared_memory(rel: &str) -> bool {
 
 fn normalize(path: &str) -> String {
     path.replace('\\', "/").trim_start_matches("./").to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_pace_follows_the_machine_within_limits() {
+        let second = Duration::from_secs(1);
+        let mut pace = Pace::new(Duration::from_secs(60));
+        assert_eq!(pace.chunks, MIN_JOB);
+        pace.record(64, second, Duration::ZERO);
+        assert_eq!(pace.chunks, 256, "grows gradually");
+        pace.record(256, second * 4, Duration::ZERO);
+        pace.record(1024, second * 16, Duration::ZERO);
+        assert_eq!(pace.chunks, MAX_JOB.min(64 * 60));
+        pace.record(100, second * 1000, Duration::ZERO);
+        assert_eq!(pace.chunks, MIN_JOB, "a slow machine still saves whole files");
+        let mut paused = Pace::new(Duration::ZERO);
+        paused.record(1000, second, Duration::ZERO);
+        assert_eq!(paused.chunks, MIN_JOB);
+        pace.record(64, second, second * 10);
+        assert_eq!(pace.chunks, 256, "slow saves are spaced out");
+    }
 }

@@ -1,6 +1,6 @@
 # 0018. Index text first, then add vectors in saved batches
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-11-26
 
 ## Context
@@ -59,6 +59,22 @@ Embedding on that machine runs at about 11 chunks a second, so 100 000 chunks ta
 minute adds around 1% of time in either store. It does add disk writes, and the extra LanceDB versions
 take space until pruned.
 
+## Measured on the implementation
+
+Linux x86_64, 167 files and 1567 chunks, quantized model, five runs of each, LanceDB store.
+
+| | single pass | two passes |
+|---|---|---|
+| Text search ready | when indexing ends, about 130 s | 0.4 to 0.9 s |
+| Total time | 131 to 140 s | 132 to 152 s, paired runs within 9% (median 1%) |
+| Peak memory | 564 to 568 MB | 581 to 602 MB, median 4% more |
+
+The first version needed about 20% more memory at its peak: glibc kept memory freed by the text pass in
+pools that embedding could not reuse. Indexing now returns freed memory to the system after the text
+pass and after each save. What remains is file backed memory; the process' own allocations match the
+single pass. Capping the number of pools (`M_ARENA_MAX`) fixed it too, but made parallel text indexing
+20 to 36% slower, so it was not used. With the Arrow store the peak went down.
+
 ## To verify before acceptance of the implementation
 
 - First search under 10 s on the 147 file reference project.
@@ -70,6 +86,9 @@ take space until pruned.
 - Disk after pruning, and recall of an index built while rows had no vectors.
 - Search during indexing through the daemon; Windows file locking.
 - Whether 95% is the right threshold, with real questions.
+
+Still unverified: the 95% threshold has not been compared with other values on real questions. It is
+kept for now, and is one constant to change.
 
 ## Consequences
 

@@ -19,7 +19,7 @@ use anyhow::{Result, bail};
 use brok_core::config::StoreBackend;
 
 use crate::chunk::Chunk;
-use crate::schema::Precision;
+use crate::schema::VectorFormat;
 
 /// A chunk store, dispatched statically over the compiled backends.
 pub enum ChunkStore {
@@ -70,12 +70,25 @@ impl ChunkStore {
         }
     }
 
-    /// The number type of the stored vectors.
-    pub fn precision(&self) -> Precision {
+    /// How the vectors are stored.
+    pub fn format(&self) -> VectorFormat {
         match self {
-            Self::Arrow(store) => store.precision(),
+            Self::Arrow(store) => store.format(),
             #[cfg(feature = "lancedb")]
-            Self::Lance(store) => store.precision(),
+            Self::Lance(store) => store.format(),
+        }
+    }
+
+    /// Frees the space of replaced data older than `older_than`. The Arrow
+    /// store already removes it at each commit.
+    pub async fn prune(&mut self, older_than: std::time::Duration) -> Result<()> {
+        match self {
+            Self::Arrow(_) => {
+                let _ = older_than;
+                Ok(())
+            }
+            #[cfg(feature = "lancedb")]
+            Self::Lance(store) => store.prune(older_than).await,
         }
     }
 

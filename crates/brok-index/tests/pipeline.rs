@@ -154,3 +154,198 @@ async fn writer_requires_the_model_when_embeddings_are_enabled() {
     let err = Index::open(&ws, None, Access::ReadWrite).await.err().expect("must fail");
     assert!(err.to_string().contains("embedding model"), "{err}");
 }
+
+/// Embeds like [`HashEmbedder`] but fails after `budget` calls, as a run that
+/// is stopped halfway.
+struct StopsAfter {
+    budget: std::sync::Mutex<usize>,
+}
+
+impl Embedder for StopsAfter {
+    fn dims(&self) -> usize {
+        HashEmbedder.dims()
+    }
+    fn model_id(&self) -> &str {
+        HashEmbedder.model_id()
+    }
+    fn embed(&self, texts: &[String], kind: EmbedKind) -> Result<Vec<Vec<f32>>> {
+        if kind == EmbedKind::Document {
+            let mut left = self.budget.lock().unwrap();
+            let Some(rest) = left.checked_sub(1) else { anyhow::bail!("stopped") };
+            *left = rest;
+        }
+        HashEmbedder.embed(texts, kind)
+    }
+}
+
+fn many_files(root: &std::path::Path, count: usize) {
+    for i in 0..count {
+        std::fs::write(root.join(format!("src/item{i:03}.rs")), format!("pub fn item_{i}_total() -> u32 {{ {i} }}\n"))
+            .unwrap();
+    }
+}
+
+async fn counts(index: &Index) -> (usize, usize, usize, bool) {
+    let status = index.status().await.unwrap();
+    (status[0].files, status[0].chunks, status[0].waiting, status[0].semantic)
+}
+
+fn query(text: &str) -> SearchQuery {
+    SearchQuery { text: text.into(), limit: 5, focus: None }
+}
+
+async fn interrupted_indexing_resumes(store: StoreBackend) {
+    let (_dir, ws) = workspace(store, true);
+    many_files(ws.root(), 300);
+    // Enough for two saves of about 64 chunks, then it stops.
+    let stops = Arc::new(StopsAfter { budget: 2.into() });
+    let mut index = Index::open(&ws, Some(stops), Access::ReadWrite).await.unwrap();
+    index.set_checkpoint(std::time::Duration::ZERO);
+
+    // The text pass alone: everything is found by keywords, nothing by meaning.
+    index.index_text(false, &|_| {}).await.unwrap();
+    let (files, chunks, waiting, semantic) = counts(&index).await;
+    assert_eq!((waiting, semantic), (chunks, false));
+    let found = index.search(&query("item 217 total")).await.unwrap();
+    assert!(!found.semantic);
+    assert!(found.hits.iter().any(|h| h.path == "src/item217.rs"), "{found:?}");
+
+    index.fill_vectors(&|_| {}).await.expect_err("stopped halfway");
+    let (_, _, left, _) = counts(&index).await;
+    assert!(left > 0 && left < chunks, "saved work is kept: {left} of {chunks}");
+    drop(index); // as if the process ended
+
+    // A new run, even with no file changed, embeds only what is left.
+    let mut index = Index::open(&ws, embedder(true), Access::ReadWrite).await.unwrap();
+    assert_eq!(index.waiting_chunks(), left);
+    let embedded = std::sync::atomic::AtomicUsize::new(0);
+    let report = index
+        .index_all(false, &|event| {
+            if let brok_index::Progress::TextReady { waiting } = event {
+                embedded.store(waiting, std::sync::atomic::Ordering::SeqCst);
+            }
+        })
+        .await
+        .unwrap();
+    assert_eq!((report.files_indexed, embedded.into_inner()), (0, left));
+    assert_eq!(counts(&index).await, (files, chunks, 0, true), "nothing lost or duplicated");
+    let reader = Index::open(&ws, embedder(true), Access::ReadOnly).await.unwrap();
+    let found = reader.search(&query("item 217 total")).await.unwrap();
+    assert!(found.semantic);
+    let paths: Vec<_> = found.hits.iter().map(|h| h.path.as_str()).collect();
+    assert_eq!(paths.iter().filter(|p| **p == "src/item217.rs").count(), 1, "{paths:?}");
+}
+
+async fn files_changed_between_the_passes_end_up_right(store: StoreBackend) {
+    let (_dir, ws) = workspace(store, true);
+    many_files(ws.root(), 3);
+    let mut index = Index::open(&ws, embedder(true), Access::ReadWrite).await.unwrap();
+    index.index_text(false, &|_| {}).await.unwrap();
+    let job = index.vector_job(10_000).unwrap();
+    // While the job embeds: one file is edited and indexed, one deleted
+    // unnoticed, one edited unnoticed.
+    let root = ws.root();
+    std::fs::write(root.join("src/item000.rs"), "pub fn renamed_alpha() {}\n").unwrap();
+    index.apply_changes_text(&["src/item000.rs".into()], &[]).await.unwrap();
+    std::fs::remove_file(root.join("src/item001.rs")).unwrap();
+    std::fs::write(root.join("src/item002.rs"), "pub fn renamed_gamma() {}\n").unwrap();
+    let batch = job.run().await.unwrap();
+    index.save_vectors(batch).await.unwrap();
+    index.fill_vectors(&|_| {}).await.unwrap();
+    index.index_all(false, &|_| {}).await.unwrap();
+
+    assert_eq!(index.waiting_chunks(), 0);
+    for (text, path) in [("renamed alpha", "src/item000.rs"), ("renamed gamma", "src/item002.rs")] {
+        let found = index.search(&query(text)).await.unwrap();
+        assert_eq!(found.hits[0].path, path, "{text}: {found:?}");
+        assert!(found.hits[0].content.contains("renamed"), "{found:?}");
+    }
+    let found = index.search(&query("item 1 total")).await.unwrap();
+    assert!(found.hits.iter().all(|h| h.path != "src/item001.rs" && !h.content.contains("item_0_total")));
+}
+
+#[tokio::test]
+async fn arrow_interrupted_indexing_resumes() {
+    interrupted_indexing_resumes(StoreBackend::Arrow).await;
+}
+
+#[tokio::test]
+async fn arrow_files_changed_between_the_passes_end_up_right() {
+    files_changed_between_the_passes_end_up_right(StoreBackend::Arrow).await;
+}
+
+#[cfg(feature = "lancedb")]
+#[tokio::test]
+async fn lancedb_interrupted_indexing_resumes() {
+    interrupted_indexing_resumes(StoreBackend::Lancedb).await;
+}
+
+#[cfg(feature = "lancedb")]
+#[tokio::test]
+async fn lancedb_files_changed_between_the_passes_end_up_right() {
+    files_changed_between_the_passes_end_up_right(StoreBackend::Lancedb).await;
+}
+
+/// Another process searching while the index is written: every open and every
+/// search must work, whatever the writer is replacing at that moment. On
+/// Windows an open or mapped file cannot be replaced as freely as elsewhere.
+fn searched_while_written(store: StoreBackend) {
+    let runtime = || tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let (_dir, ws) = workspace(store, true);
+    many_files(ws.root(), 200);
+    let writer = runtime();
+    let mut index = writer.block_on(Index::open(&ws, embedder(true), Access::ReadWrite)).unwrap();
+    index.set_checkpoint(std::time::Duration::ZERO);
+    writer.block_on(index.index_text(false, &|_| {})).unwrap();
+
+    let done = std::sync::atomic::AtomicBool::new(false);
+    let (reads, failures) = std::thread::scope(|scope| {
+        let reader = scope.spawn(|| {
+            let runtime = runtime();
+            let (mut reads, mut failures) = (0usize, Vec::new());
+            // A snapshot kept open, as the daemon does beside another writer.
+            let held = runtime.block_on(Index::open(&ws, embedder(true), Access::ReadOnly)).unwrap();
+            while !done.load(std::sync::atomic::Ordering::SeqCst) {
+                let result = runtime.block_on(async {
+                    let fresh = Index::open(&ws, embedder(true), Access::ReadOnly).await?;
+                    let found = fresh.search(&query("item 117 total")).await?;
+                    anyhow::ensure!(!found.hits.is_empty(), "a fresh reader found nothing");
+                    held.search(&query("item 117 total")).await?;
+                    Ok::<_, anyhow::Error>(())
+                });
+                reads += 1;
+                if let Err(e) = result {
+                    failures.push(format!("{e:#}"));
+                }
+            }
+            (reads, failures)
+        });
+        // Stops the reader even when the writer fails.
+        let written = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            writer.block_on(index.fill_vectors(&|_| {})).unwrap();
+            for round in 0..20 {
+                let changed = format!("src/item{round:03}.rs");
+                std::fs::write(ws.root().join(&changed), format!("pub fn item_{round}_again() {{}}\n")).unwrap();
+                writer.block_on(index.apply_changes(&[changed], &[])).unwrap();
+            }
+        }));
+        done.store(true, std::sync::atomic::Ordering::SeqCst);
+        let read = reader.join().unwrap();
+        written.unwrap();
+        read
+    });
+    assert!(reads > 0);
+    assert!(failures.is_empty(), "{} of {reads} reads failed, first: {}", failures.len(), failures[0]);
+    assert_eq!(index.waiting_chunks(), 0);
+}
+
+#[test]
+fn arrow_store_is_searched_while_written() {
+    searched_while_written(StoreBackend::Arrow);
+}
+
+#[cfg(feature = "lancedb")]
+#[test]
+fn lancedb_store_is_searched_while_written() {
+    searched_while_written(StoreBackend::Lancedb);
+}

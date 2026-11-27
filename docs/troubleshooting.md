@@ -139,3 +139,10 @@ already tracks:
 To share one of these folders on purpose, add a rule such as `!/memory/` to `.brokspace/.gitignore`.
 Shared memories belong in `.brokspace-memory/`.
 
+## Search finds words but not meaning
+
+While a workspace is first being indexed, results come from keywords only: vectors are still being
+computed. `brok status` shows the share embedded and how many chunks wait, and `brok doctor` warns.
+Leave `brok index` or `brok init` running, or leave brok running (`brok start`), and search by meaning
+turns on when 95% of a partition is done. Interrupting is safe: the next run continues.
+

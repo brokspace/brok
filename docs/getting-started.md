@@ -106,7 +106,7 @@ It walks through six steps and asks before anything big:
 | 2. Agent | Installs `brok-agent`, the helper that tracks changes and talks to the LLM |
 | 3. Semantic search | Downloads the search model once (~140 MB, shared by all your projects) |
 | 4. Local LLM | Finds Ollama / LM Studio and picks a model that fits your machine |
-| 5. Index | Indexes your code (functions, classes and sections, not raw text) |
+| 5. Index | Indexes your code (functions, classes and sections, not raw text). Keyword search works after a first quick pass; search by meaning follows, and stopping it keeps what is done |
 | 6. Coding agents | Connects Claude Code, Cursor, VS Code or Codex (skills + search tool) |
 
 Want no questions? `brok init --yes` accepts every recommendation, including

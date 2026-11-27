@@ -28,12 +28,13 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{Context, Result, anyhow, ensure};
+use anyhow::{Result, anyhow, ensure};
 use arrow_array::cast::AsArray;
 use arrow_array::types::{Float16Type, Float32Type, UInt32Type};
 use arrow_array::{
     Array, ArrayRef, FixedSizeListArray, Float16Array, Float32Array, RecordBatch, StringArray, UInt32Array,
 };
+use arrow_buffer::NullBuffer;
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use half::f16;
 use half::slice::HalfFloatSliceExt;
@@ -77,8 +78,25 @@ impl Precision {
     }
 }
 
+/// How a store keeps its vectors. A store keeps the format it was created
+/// with until it is rebuilt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VectorFormat {
+    /// Number type.
+    pub precision: Precision,
+    /// Rows may wait for their vector (ADR 0018). Tables from brok 0.11 and
+    /// earlier require one.
+    pub optional: bool,
+}
+
+impl Default for VectorFormat {
+    fn default() -> Self {
+        Self { precision: Precision::default(), optional: true }
+    }
+}
+
 /// Builds the chunk schema, with a vector column when `dims` is set.
-pub fn chunk_schema(dims: Option<usize>, precision: Precision) -> SchemaRef {
+pub fn chunk_schema(dims: Option<usize>, format: VectorFormat) -> SchemaRef {
     let utf8 = |name: &str, nullable| Field::new(name, DataType::Utf8, nullable);
     let u32_field = |name: &str| Field::new(name, DataType::UInt32, false);
     let mut fields = vec![
@@ -98,7 +116,7 @@ pub fn chunk_schema(dims: Option<usize>, precision: Precision) -> SchemaRef {
     ];
     let mut metadata = HashMap::from([(META_VERSION.to_owned(), SCHEMA_VERSION.to_owned())]);
     if let Some(dims) = dims {
-        fields.push(Field::new(VECTOR_COLUMN, vector_type(dims, precision), false));
+        fields.push(Field::new(VECTOR_COLUMN, vector_type(dims, format.precision), format.optional));
         metadata.insert(META_DIMS.to_owned(), dims.to_string());
     }
     Arc::new(Schema::new_with_metadata(fields, metadata))
@@ -117,6 +135,12 @@ pub fn schema_precision(schema: &Schema) -> Option<Precision> {
     }
 }
 
+/// The format of a schema's vector column (`None` = no vector column).
+pub fn schema_format(schema: &Schema) -> Option<VectorFormat> {
+    let optional = schema.field_with_name(VECTOR_COLUMN).ok()?.is_nullable();
+    Some(VectorFormat { precision: schema_precision(schema)?, optional })
+}
+
 /// Embedding dimensions declared by a schema (`None` = no vector column).
 pub fn schema_dims(schema: &Schema) -> Option<usize> {
     match schema.field_with_name(VECTOR_COLUMN).ok()?.data_type() {
@@ -130,9 +154,9 @@ pub fn to_record_batch(
     chunks: &[Chunk],
     vectors: Option<&[Vec<f32>]>,
     dims: Option<usize>,
-    precision: Precision,
+    format: VectorFormat,
 ) -> Result<RecordBatch> {
-    let schema = chunk_schema(dims, precision);
+    let schema = chunk_schema(dims, format);
     let strings = |f: fn(&Chunk) -> &str| -> ArrayRef { Arc::new(StringArray::from_iter_values(chunks.iter().map(f))) };
     let optional =
         |f: fn(&Chunk) -> Option<&str>| -> ArrayRef { Arc::new(chunks.iter().map(f).collect::<StringArray>()) };
@@ -155,19 +179,29 @@ pub fn to_record_batch(
     ];
 
     if let Some(dims) = dims {
-        let vectors = vectors.context("vectors are required when the schema has a vector column")?;
-        ensure!(vectors.len() == chunks.len(), "got {} vectors for {} chunks", vectors.len(), chunks.len());
-        let mut flat = Vec::with_capacity(vectors.len() * dims);
-        for vector in vectors {
-            ensure!(vector.len() == dims, "vector has {} dimensions, expected {dims}", vector.len());
-            flat.extend_from_slice(vector);
-        }
+        let precision = format.precision;
+        let (flat, nulls) = match vectors {
+            Some(vectors) => {
+                ensure!(vectors.len() == chunks.len(), "got {} vectors for {} chunks", vectors.len(), chunks.len());
+                let mut flat = Vec::with_capacity(vectors.len() * dims);
+                for vector in vectors {
+                    ensure!(vector.len() == dims, "vector has {} dimensions, expected {dims}", vector.len());
+                    flat.extend_from_slice(vector);
+                }
+                (flat, None)
+            }
+            // Rows waiting for their vector.
+            None => {
+                ensure!(format.optional, "vectors are required when the schema has a vector column");
+                (vec![0.0; chunks.len() * dims], Some(NullBuffer::new_null(chunks.len())))
+            }
+        };
         let item = Arc::new(Field::new("item", precision.data_type(), true));
         let values: ArrayRef = match precision {
             Precision::Half => Arc::new(Float16Array::from_iter_values(flat.into_iter().map(f16::from_f32))),
             Precision::Single => Arc::new(Float32Array::from(flat)),
         };
-        let list = FixedSizeListArray::try_new(item, dims as i32, values, None)?;
+        let list = FixedSizeListArray::try_new(item, dims as i32, values, nulls)?;
         columns.push(Arc::new(list));
     }
 
@@ -277,6 +311,9 @@ impl<'a> ChunkColumns<'a> {
 
     fn stored_vector(&self, row: usize) -> Option<Stored<'a>> {
         let list = self.vector?;
+        if list.is_null(row) {
+            return None;
+        }
         let dims = list.value_length() as usize;
         let start = list.value_offset(row) as usize;
         let range = start..start + dims;
@@ -343,7 +380,7 @@ pub(crate) mod tests {
     #[test]
     fn roundtrip_without_vectors() {
         let chunks = vec![sample("1", "a.rs"), Chunk { symbol: None, ..sample("2", "b.rs") }];
-        let batch = to_record_batch(&chunks, None, None, Precision::default()).unwrap();
+        let batch = to_record_batch(&chunks, None, None, VectorFormat::default()).unwrap();
         assert_eq!(schema_dims(&batch.schema()), None);
         assert_eq!(from_record_batch(&batch).unwrap(), chunks);
     }
@@ -353,14 +390,21 @@ pub(crate) mod tests {
         let chunks = vec![sample("1", "a.rs"), sample("2", "b.rs")];
         let vectors = vec![vec![1.0, 0.0, 0.0], vec![0.0, 0.6, -0.8]];
         for precision in [Precision::Half, Precision::Single] {
-            let batch = to_record_batch(&chunks, Some(&vectors), Some(3), precision).unwrap();
+            let format = VectorFormat { precision, optional: false };
+            let batch = to_record_batch(&chunks, Some(&vectors), Some(3), format).unwrap();
             assert_eq!(schema_dims(&batch.schema()), Some(3));
             assert_eq!(schema_precision(&batch.schema()), Some(precision));
             let columns = ChunkColumns::new(&batch).unwrap();
             let stored = columns.vector(1).unwrap();
             assert!(stored.iter().zip(&vectors[1]).all(|(a, b)| (a - b).abs() < 1e-3), "{stored:?}");
             assert!((columns.similarity(1, &vectors[1]).unwrap() - 1.0).abs() < 1e-3);
-            assert!(to_record_batch(&chunks, Some(&vectors[..1]), Some(3), precision).is_err());
+            assert!(to_record_batch(&chunks, Some(&vectors[..1]), Some(3), format).is_err());
+            assert!(to_record_batch(&chunks, None, Some(3), format).is_err(), "required here");
+            let waiting = VectorFormat { precision, optional: true };
+            let batch = to_record_batch(&chunks, None, Some(3), waiting).unwrap();
+            assert_eq!(schema_format(&batch.schema()), Some(waiting));
+            let columns = ChunkColumns::new(&batch).unwrap();
+            assert!(columns.vector(0).is_none() && columns.similarity(0, &vectors[0]).is_none());
         }
     }
 
@@ -375,8 +419,12 @@ pub(crate) mod tests {
             };
             let (stored, query) = (vector(1), vector(2));
             let score = |precision| {
-                let batch =
-                    to_record_batch(&[sample("1", "a.rs")], Some(std::slice::from_ref(&stored)), Some(dims), precision);
+                let batch = to_record_batch(
+                    &[sample("1", "a.rs")],
+                    Some(std::slice::from_ref(&stored)),
+                    Some(dims),
+                    VectorFormat { precision, optional: false },
+                );
                 ChunkColumns::new(&batch.unwrap()).unwrap().similarity(0, &query).unwrap()
             };
             assert!((score(Precision::Half) - score(Precision::Single)).abs() < 1e-3, "{dims}");
