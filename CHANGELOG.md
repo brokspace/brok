@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-27
+
 ### Added
 
 - Shards in Python, TypeScript and Java: a guide to the protocol and packaging (`docs/shards-other-languages.md`) and three working examples in `examples/shards`, tested in CI on Linux and macOS.
