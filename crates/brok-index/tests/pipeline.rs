@@ -285,3 +285,67 @@ async fn lancedb_interrupted_indexing_resumes() {
 async fn lancedb_files_changed_between_the_passes_end_up_right() {
     files_changed_between_the_passes_end_up_right(StoreBackend::Lancedb).await;
 }
+
+/// Another process searching while the index is written: every open and every
+/// search must work, whatever the writer is replacing at that moment. On
+/// Windows an open or mapped file cannot be replaced as freely as elsewhere.
+fn searched_while_written(store: StoreBackend) {
+    let runtime = || tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let (_dir, ws) = workspace(store, true);
+    many_files(ws.root(), 200);
+    let writer = runtime();
+    let mut index = writer.block_on(Index::open(&ws, embedder(true), Access::ReadWrite)).unwrap();
+    index.set_checkpoint(std::time::Duration::ZERO);
+    writer.block_on(index.index_text(false, &|_| {})).unwrap();
+
+    let done = std::sync::atomic::AtomicBool::new(false);
+    let (reads, failures) = std::thread::scope(|scope| {
+        let reader = scope.spawn(|| {
+            let runtime = runtime();
+            let (mut reads, mut failures) = (0usize, Vec::new());
+            // A snapshot kept open, as the daemon does beside another writer.
+            let held = runtime.block_on(Index::open(&ws, embedder(true), Access::ReadOnly)).unwrap();
+            while !done.load(std::sync::atomic::Ordering::SeqCst) {
+                let result = runtime.block_on(async {
+                    let fresh = Index::open(&ws, embedder(true), Access::ReadOnly).await?;
+                    let found = fresh.search(&query("item 117 total")).await?;
+                    anyhow::ensure!(!found.hits.is_empty(), "a fresh reader found nothing");
+                    held.search(&query("item 117 total")).await?;
+                    Ok::<_, anyhow::Error>(())
+                });
+                reads += 1;
+                if let Err(e) = result {
+                    failures.push(format!("{e:#}"));
+                }
+            }
+            (reads, failures)
+        });
+        // Stops the reader even when the writer fails.
+        let written = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            writer.block_on(index.fill_vectors(&|_| {})).unwrap();
+            for round in 0..20 {
+                let changed = format!("src/item{round:03}.rs");
+                std::fs::write(ws.root().join(&changed), format!("pub fn item_{round}_again() {{}}\n")).unwrap();
+                writer.block_on(index.apply_changes(&[changed], &[])).unwrap();
+            }
+        }));
+        done.store(true, std::sync::atomic::Ordering::SeqCst);
+        let read = reader.join().unwrap();
+        written.unwrap();
+        read
+    });
+    assert!(reads > 0);
+    assert!(failures.is_empty(), "{} of {reads} reads failed, first: {}", failures.len(), failures[0]);
+    assert_eq!(index.waiting_chunks(), 0);
+}
+
+#[test]
+fn arrow_store_is_searched_while_written() {
+    searched_while_written(StoreBackend::Arrow);
+}
+
+#[cfg(feature = "lancedb")]
+#[test]
+fn lancedb_store_is_searched_while_written() {
+    searched_while_written(StoreBackend::Lancedb);
+}
