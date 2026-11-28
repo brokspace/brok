@@ -1,8 +1,9 @@
 # DX 1.0 proposal: powerful inside, effortless outside
 
 Status: **priority roadmap**, taken ahead of the orchestrator and PR Intelligence work (2026-11-26).
-The privacy fix is brokspace/brok#195; the other changes are not implemented yet. Documents: [audit](audit.md) · [principles, specifications, wireframes, metrics](specs.md) ·
-[diagrams](diagrams/).
+Released so far: brokspace/brok#195, #197, #198 and #199 in 0.11.0, and text-first search (brok#200) in
+0.12.0; the issues hold the state of the rest. Documents: [audit](audit.md) ·
+[principles, specifications, wireframes, metrics](specs.md) · [diagrams](diagrams/).
 
 ## Executive summary
 
@@ -79,14 +80,15 @@ CI, changelog entry, docs updated, no regression of the baselines. Order across 
 | vscode#40 to #44, #46 to #48 | shipped in 0.4.0 and 0.5.x, open pending manual review | M0, M3 |
 | vscode#45 | partly shipped; blocked on brok#152 | M3 |
 | brok#72 | scan, batch size and doctor warning done; profiles on hold | M2 |
-| brok#192 | **fixed** 2026-11-26, in the pending 0.11.0 release | done |
+| brok#192 | **fixed**, released in 0.11.0 | done |
 | brok#46 | version compatibility open | M1 dependency |
 | brok#42, #43, #44 | packaging and signing | M4 |
 | website#58, brok#111 | adoption docs | M4 |
 
 ## Risks
 
-- **Privacy:** until the release with brok#195, tell users to check `git status` before committing `.brokspace/`.
+- **Privacy:** brok 0.11.0 repairs the ignore rules of older workspaces (brok#195). Files committed before
+  that stay in the git history.
 - **Compatibility:** brok, brok-agent and the extension version independently; M1 PR 2 must pin a range.
 - **Performance:** text-first indexing must not make the total index time or memory worse.
 - **Scope:** the unmeasured platforms may reorder M1 to M4.
