@@ -15,7 +15,7 @@ authors = ["Brokspace contributors"]
 # Internal crates. `brok-sdk` lives in its own repository and comes from
 # crates.io; for polyrepo development `scripts/bootstrap` patches it to the
 # sibling checkout (see CONTRIBUTING.md).
-brok-sdk = "0.3.1"
+brok-sdk = "0.3.2"
 brok-core = { version = "0.13.0", path = "crates/brok-core" }
 brok-bus = { version = "0.13.0", path = "crates/brok-bus" }
 brok-index = { version = "0.13.0", path = "crates/brok-index", default-features = false }
