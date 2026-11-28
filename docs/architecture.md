@@ -138,6 +138,7 @@ The final top-k chunk ids are materialized from their stores.
 | `agent:ask.chunk` / `.done` / `.error` | streamed reply | agent → requester |
 | `review:result` | `{path, verdict, summary}` | agent → anyone |
 | `system:shutdown` | `{reason}` | runtime → everyone |
+| `system:request.cancelled` | `{request}` | runtime → the agent, when the client asking an `agent:ask` leaves before the answer is complete |
 
 Types live in `brok_sdk::payload`.
 

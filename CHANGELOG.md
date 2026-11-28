@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-11-28
+
+### Fixed
+
+- Stopping a question (Ctrl+C, **Stop** in the editor, or the process ending) tells brok-agent, which closes its request to the model. Before, the model kept generating until the answer was complete, on your machine or on your bill. Needs brok-agent 0.5.3 or newer ([#219](https://github.com/brokspace/brok/issues/219)).
+
 ## [0.13.0] - 2026-11-28
 
 ### Added

@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use brok_sdk::frame::{ErrorCode, ServerFrame};
+use brok_sdk::payload::{RequestCancelled, topics};
 use brok_sdk::topic::SYSTEM_NAMESPACE;
 use brok_sdk::{Event, Topic, TopicPattern};
 use tokio::sync::{mpsc, oneshot};
@@ -25,6 +26,8 @@ pub const BUS_IDENTITY: &str = "brok";
 
 const REPLY_TABLE_CAPACITY: usize = 65_536;
 const REPLY_TTL: Duration = Duration::from_secs(15 * 60);
+/// Unanswered questions followed at once; the agent admits far fewer.
+const OPEN_ASK_CAPACITY: usize = 1024;
 
 pub(crate) enum Command {
     Join { conn: ConnId, grant: Arc<Grant>, tx: mpsc::Sender<ServerFrame> },
@@ -119,10 +122,19 @@ impl ReplyTable {
     }
 }
 
+/// A question not yet answered in full: who asked and who received it.
+struct OpenAsk {
+    origin: ConnId,
+    handlers: Vec<ConnId>,
+}
+
 #[derive(Default)]
 struct Router {
     connections: HashMap<ConnId, Connection>,
     replies: ReplyTable,
+    /// By request id. Answering costs a model call, so whoever answers is
+    /// told when the one asking leaves.
+    open_asks: HashMap<Uuid, OpenAsk>,
     stats: BusStats,
 }
 
@@ -143,6 +155,7 @@ impl Router {
                 if let Some(c) = self.connections.remove(&conn) {
                     tracing::debug!(conn, identity = %c.grant.identity, "session left");
                 }
+                self.cancel_asks_of(conn);
             }
             Command::Subscribe { conn, patterns } => self.subscribe(conn, patterns),
             Command::Publish { conn: Some(conn), event } => self.publish_from(conn, event),
@@ -211,7 +224,14 @@ impl Router {
         self.stats.published += 1;
 
         // Replies go straight back to the requester, nobody else sees them.
-        if let Some(target) = event.correlation_id.and_then(|id| self.replies.origin_of(&id)) {
+        if let Some(request) = event.correlation_id
+            && let Some(target) = self.replies.origin_of(&request)
+        {
+            let last = [topics::AGENT_ASK_DONE, topics::AGENT_ASK_ERROR].contains(&event.topic.as_str());
+            if last && self.open_asks.get(&request).is_some_and(|ask| origin.is_some_and(|c| ask.handlers.contains(&c)))
+            {
+                self.open_asks.remove(&request);
+            }
             self.send(target, ServerFrame::Event { event });
             return;
         }
@@ -227,8 +247,36 @@ impl Router {
             .filter(|(_, c)| broadcast || c.subscriptions.iter().any(|p| p.matches(&event.topic)))
             .map(|(id, _)| *id)
             .collect();
+        if let Some(origin) = origin
+            && event.topic.as_str() == topics::AGENT_ASK
+            && !targets.is_empty()
+            && self.open_asks.len() < OPEN_ASK_CAPACITY
+        {
+            self.open_asks.insert(event.id, OpenAsk { origin, handlers: targets.clone() });
+        }
         for target in targets {
             self.send(target, ServerFrame::Event { event: event.clone() });
+        }
+    }
+
+    /// Tells whoever received the unanswered questions of `conn` to stop.
+    fn cancel_asks_of(&mut self, conn: ConnId) {
+        let mut cancelled = Vec::new();
+        self.open_asks.retain(|request, ask| {
+            if ask.origin == conn {
+                cancelled.push((*request, std::mem::take(&mut ask.handlers)));
+                return false;
+            }
+            ask.handlers.retain(|handler| *handler != conn);
+            !ask.handlers.is_empty()
+        });
+        for (request, handlers) in cancelled {
+            let Ok(mut event) = Event::from_payload(&RequestCancelled { request }) else { continue };
+            event.source = BUS_IDENTITY.into();
+            tracing::debug!(%request, "the requester left; cancelling");
+            for handler in handlers {
+                self.send(handler, ServerFrame::Event { event: event.clone() });
+            }
         }
     }
 
