@@ -33,6 +33,8 @@ use crate::schema::{ChunkColumns, VectorFormat, chunk_schema, schema_dims, schem
 pub(crate) const CURRENT: &str = "CURRENT";
 /// Batches are coalesced on commit once there are more than this many.
 const MAX_BATCHES: usize = 8;
+/// Generations a reader tries before giving up on a very busy writer.
+const READ_ATTEMPTS: usize = 100;
 
 /// See the module documentation.
 pub struct ArrowStore {
@@ -50,9 +52,7 @@ impl ArrowStore {
     /// Opens the live generation in `dir`, creating the directory if needed.
     pub fn open(dir: &Path, dims: Option<usize>) -> Result<Self> {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-        let generation =
-            std::fs::read_to_string(dir.join(CURRENT)).ok().and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
-        let batches = if generation == 0 { Vec::new() } else { read_ipc(&generation_path(dir, generation))? };
+        let (generation, batches) = read_live(dir, read_ipc)?;
         // Existing data keeps its own layout; `dims` only applies to new stores.
         let dims = batches.first().map_or(dims, |first| schema_dims(&first.schema()));
         let format = batches.first().and_then(|first| schema_format(&first.schema())).unwrap_or_default();
@@ -212,6 +212,36 @@ fn write_ipc(path: &Path, schema: &arrow_schema::Schema, batches: &[RecordBatch]
 }
 
 /// Maps an IPC file and decodes its batches without copying.
+/// The generation `CURRENT` names, 0 before the first commit.
+fn current_generation(dir: &Path) -> u64 {
+    std::fs::read_to_string(dir.join(CURRENT)).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0)
+}
+
+/// Reads the live generation with `read`. A writer removes a generation as
+/// soon as it has replaced it, possibly between reading `CURRENT` and opening
+/// the file: then the newer one is read.
+fn read_live(dir: &Path, mut read: impl FnMut(&Path) -> Result<Vec<RecordBatch>>) -> Result<(u64, Vec<RecordBatch>)> {
+    let mut generation = current_generation(dir);
+    let mut attempts = 1;
+    loop {
+        if generation == 0 {
+            return Ok((generation, Vec::new()));
+        }
+        match read(&generation_path(dir, generation)) {
+            Ok(batches) => return Ok((generation, batches)),
+            Err(e) => {
+                let newer = current_generation(dir);
+                // Unchanged: the live file itself cannot be read.
+                if newer == generation || attempts == READ_ATTEMPTS {
+                    return Err(e);
+                }
+                generation = newer;
+                attempts += 1;
+            }
+        }
+    }
+}
+
 fn read_ipc(path: &Path) -> Result<Vec<RecordBatch>> {
     let file = File::open(path).with_context(|| format!("opening {}", path.display()))?;
     // SAFETY: generation files are written once, renamed into place and
@@ -250,6 +280,34 @@ mod tests {
     use super::*;
     use crate::schema::Precision;
     use crate::schema::tests::sample;
+
+    #[test]
+    fn a_generation_replaced_while_opening_is_read_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = |n: u64| std::fs::write(dir.path().join(CURRENT), n.to_string()).unwrap();
+        live(1);
+        let mut tried = Vec::new();
+        let (generation, _) = read_live(dir.path(), |path| {
+            tried.push(path.to_path_buf());
+            if tried.len() == 1 {
+                live(2);
+                anyhow::bail!("removed by the writer");
+            }
+            Ok(Vec::new())
+        })
+        .unwrap();
+        assert_eq!(generation, 2);
+        assert_eq!(tried, [generation_path(dir.path(), 1), generation_path(dir.path(), 2)]);
+
+        // A live file that cannot be read stays an error, without retrying.
+        let mut reads = 0;
+        let broken = read_live(dir.path(), |_| {
+            reads += 1;
+            anyhow::bail!("damaged")
+        });
+        assert!(broken.is_err());
+        assert_eq!(reads, 1);
+    }
 
     #[test]
     fn commit_delete_and_reopen() {

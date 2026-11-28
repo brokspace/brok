@@ -5,6 +5,7 @@ mod daemon;
 mod integrations;
 mod local_llm;
 mod metrics;
+mod readiness;
 mod ui;
 
 use std::path::PathBuf;

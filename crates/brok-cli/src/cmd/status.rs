@@ -9,7 +9,7 @@ use brok_shard::{InstalledShard, Registry};
 use console::style;
 use serde_json::{Value, json};
 
-use crate::{daemon, ui};
+use crate::{daemon, readiness, ui};
 
 /// Arguments of `brok status`.
 #[derive(Debug, clap::Args)]
@@ -142,8 +142,14 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
 async fn json_status(workspace: &Workspace) -> Result<Value> {
     let config = workspace.config();
     let llm = config.llm.providers.get(&config.llm.default);
-    let index: Vec<Value> = partitions(workspace)
-        .await?
+    // An index that cannot be read is part of the readiness report.
+    let read = partitions(workspace).await;
+    if let Err(e) = &read {
+        tracing::warn!("cannot read the index: {e:#}");
+    }
+    let readiness = readiness::assess(workspace, read.as_deref().ok()).await;
+    let index: Vec<Value> = read
+        .unwrap_or_default()
         .iter()
         .map(|p| {
             json!({
@@ -188,6 +194,7 @@ async fn json_status(workspace: &Workspace) -> Result<Value> {
             "base_url": llm.map(|p| p.base_url.as_str()),
         },
         "index": index,
+        "readiness": readiness,
         "shards": shards,
         "links": super::link::statuses(workspace).await?,
         "memory": {

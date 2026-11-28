@@ -6,9 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `brok status --json` reports `readiness`: whether keyword and meaning search, the agent and the model are ready, with one suggested next action and a stable code for it, so editors need not read error text. Only a model server on this machine is contacted (brokspace/brok#201).
+
 ### Fixed
 
 - `brok index --rebuild`, the fix `brok doctor` suggests for an index it cannot read, now works on one: it failed while opening the damaged data.
+- `brok status --json` reports an index it cannot read, with `brok index --rebuild` as the next step, instead of failing (brokspace/brok#201).
 
 ## [0.12.0] - 2026-11-27
 
@@ -18,6 +23,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A search on an Arrow index could fail with "No such file or directory" when the index was written at that moment; it now reads the newer data.
 - A command run in the moment a daemon is starting waits for it instead of failing with "cannot read .../operator.token", or with an invalid token left behind by a daemon that crashed.
 
 ## [0.11.0] - 2026-11-27
