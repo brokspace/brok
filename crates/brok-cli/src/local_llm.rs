@@ -7,7 +7,8 @@
 
 use std::time::Duration;
 
-use serde::Deserialize;
+use brok_core::config::LlmProvider;
+use serde::{Deserialize, Serialize};
 
 /// A local server that answered `GET /v1/models`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +46,51 @@ pub async fn list_models(base_url: &str) -> Option<Vec<String>> {
     let mut models: Vec<String> = list.data.into_iter().map(|m| m.id).collect();
     models.sort();
     Some(models)
+}
+
+/// Whether the configured model can be used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelState {
+    /// The server answers and has the model.
+    Ready,
+    /// The server does not answer.
+    Unreachable,
+    /// The server answers without the model.
+    NotInstalled,
+    /// The variable that holds the API key is not set.
+    MissingKey,
+    /// `llm.default` names no provider.
+    NotConfigured,
+    /// A server elsewhere that was not contacted.
+    Unchecked,
+}
+
+/// Whether the provider needs a key from a variable that is not set.
+pub fn missing_key(provider: &LlmProvider) -> bool {
+    provider.api_key_env.as_ref().is_some_and(|var| std::env::var_os(var).is_none())
+}
+
+/// Checks the key variable, then asks the server for its models.
+pub async fn check(provider: &LlmProvider) -> ModelState {
+    if missing_key(provider) {
+        return ModelState::MissingKey;
+    }
+    match list_models(&provider.base_url).await {
+        Some(models) if models.is_empty() || has_model(&models, &provider.model) => ModelState::Ready,
+        Some(_) => ModelState::NotInstalled,
+        None => ModelState::Unreachable,
+    }
+}
+
+/// Whether the server of `base_url` runs on this machine.
+pub fn is_this_machine(base_url: &str) -> bool {
+    reqwest::Url::parse(base_url).ok().is_some_and(|url| {
+        url.host_str().is_some_and(|host| {
+            let host = host.trim_start_matches('[').trim_end_matches(']');
+            host == "localhost" || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+        })
+    })
 }
 
 /// Probes every known local server concurrently.
@@ -188,6 +234,17 @@ mod tests {
 
     fn hw(ram_gb: u64, vram_gb: Option<u64>) -> Hardware {
         Hardware { ram_gb, vram_gb, apple_silicon: false }
+    }
+
+    #[test]
+    fn only_loopback_servers_are_on_this_machine() {
+        for url in ["http://localhost:11434/v1", "http://127.0.0.1:1234/v1", "http://[::1]:8080/v1"] {
+            assert!(is_this_machine(url), "{url}");
+        }
+        for url in ["https://api.example.com/v1", "http://192.168.1.2:11434/v1", "http://localhost.example.com", "nope"]
+        {
+            assert!(!is_this_machine(url), "{url}");
+        }
     }
 
     #[test]

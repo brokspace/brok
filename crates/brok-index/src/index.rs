@@ -42,6 +42,9 @@ pub enum Access {
     ReadOnly,
     /// Exclusive writer (holds `databases/.lock`).
     ReadWrite,
+    /// [`Self::ReadWrite`] starting from nothing: the stored partitions are
+    /// removed unread, so a damaged index can be rebuilt.
+    Rebuild,
 }
 
 /// Indexing progress notifications.
@@ -91,6 +94,8 @@ pub struct IndexReport {
     pub files_removed: usize,
     /// Chunks written.
     pub chunks: usize,
+    /// Chunks that got their vector, including ones left by an earlier run.
+    pub vectors_added: usize,
     /// Wall clock time.
     pub duration: Duration,
 }
@@ -234,7 +239,7 @@ impl Index {
     pub async fn open(workspace: &Workspace, embedder: Option<Arc<dyn Embedder>>, access: Access) -> Result<Self> {
         let config = workspace.config().clone();
         let paths = workspace.paths();
-        let writable = access == Access::ReadWrite;
+        let writable = access != Access::ReadOnly;
         let lock = if writable { Some(acquire_write_lock(paths)?) } else { None };
         if writable && config.embeddings.enabled && embedder.is_none() {
             bail!("embeddings are enabled but no embedding model is loaded");
@@ -246,6 +251,9 @@ impl Index {
         for partition in partitions.iter() {
             if !writable && !partition.database_dir(paths).exists() {
                 continue; // never indexed: nothing to search, and read-only must not create it
+            }
+            if access == Access::Rebuild {
+                PartitionIndex::discard(paths, partition, config.index.store)?;
             }
             let part =
                 PartitionIndex::open(paths, partition.clone(), config.index.store, embedding.clone(), writable).await?;
@@ -277,7 +285,7 @@ impl Index {
     pub async fn index_all(&mut self, rebuild: bool, progress: &(dyn Fn(Progress) + Sync)) -> Result<IndexReport> {
         let started = Instant::now();
         let mut report = self.index_text(rebuild, progress).await?;
-        self.fill_vectors(progress).await?;
+        report.vectors_added = self.fill_vectors(progress).await?;
         report.duration = started.elapsed();
         Ok(report)
     }
@@ -431,11 +439,11 @@ impl Index {
     }
 
     /// The second pass of [`Self::index_all`]: embeds everything waiting,
-    /// saving about once a minute.
-    pub async fn fill_vectors(&mut self, progress: &(dyn Fn(Progress) + Sync)) -> Result<()> {
+    /// saving about once a minute. Returns the chunks that got a vector.
+    pub async fn fill_vectors(&mut self, progress: &(dyn Fn(Progress) + Sync)) -> Result<usize> {
         let total = self.waiting_chunks();
         if total == 0 {
-            return Ok(());
+            return Ok(0);
         }
         progress(Progress::TextReady { waiting: total });
         let mut pace = Pace::new(self.checkpoint);
@@ -451,7 +459,7 @@ impl Index {
             progress(Progress::Vectors { done: done.min(total), total });
         }
         self.prune_replaced().await;
-        Ok(())
+        Ok(done)
     }
 
     /// Frees the space of rows replaced a while ago. Failing costs disk only.
@@ -485,7 +493,7 @@ impl Index {
     pub async fn apply_changes(&mut self, changed: &[String], deleted: &[String]) -> Result<IndexReport> {
         let mut report = self.apply_changes_text(changed, deleted).await?;
         let started = Instant::now();
-        self.fill_vectors(&|_| {}).await?;
+        report.vectors_added = self.fill_vectors(&|_| {}).await?;
         report.duration += started.elapsed();
         Ok(report)
     }

@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-28
+
+### Added
+
+- `brok status --json` reports `readiness`: whether keyword and meaning search, the agent and the model are ready, with one suggested next action and a stable code for it, so editors need not read error text. Only a model server on this machine is contacted (brokspace/brok#201).
+
+### Fixed
+
+- `brok search` no longer says to enable embeddings when they are enabled and search by meaning is not ready yet.
+- `brok index` finishing an interrupted run says how many chunks got their vector, instead of only "Indexed 0 files (0 chunks)".
+- `brok index --rebuild`, the fix `brok doctor` suggests for an index it cannot read, now works on one: it failed while opening the damaged data.
+- `brok status --json` reports an index it cannot read, with `brok index --rebuild` as the next step, instead of failing (brokspace/brok#201).
+
 ## [0.12.0] - 2026-11-27
 
 ### Changed

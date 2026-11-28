@@ -107,7 +107,7 @@ impl LanceStore {
         }
         if self.dims.is_some() && self.embedded().await? >= ANN_THRESHOLD && !self.has_usable_index().await? {
             tracing::info!("building ANN vector index");
-            // Replaces an index brok 0.11 and earlier built with another metric.
+            // Replaces an index brok 0.10 and earlier built with another metric.
             let index = Index::IvfPq(IvfPqIndexBuilder::default().distance_type(METRIC));
             self.table.create_index(&[VECTOR_COLUMN], index).execute().await?;
         }
@@ -296,7 +296,7 @@ mod tests {
         let mut store = LanceStore::open(dir.path(), Some(DIMS)).await.unwrap();
         add(&mut store, 0..ANN_THRESHOLD - 1).await;
         add(&mut store, ANN_THRESHOLD - 1..ANN_THRESHOLD).await;
-        // What brok 0.11 and earlier built.
+        // What brok 0.10 and earlier built.
         let old = Index::IvfPq(IvfPqIndexBuilder::default().distance_type(DistanceType::L2));
         store.table.create_index(&[VECTOR_COLUMN], old).execute().await.unwrap();
         assert!(!plan(&store).await.contains("ANNSubIndex"), "ignored, as reported");

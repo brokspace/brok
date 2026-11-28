@@ -227,7 +227,7 @@ async fn interrupted_indexing_resumes(store: StoreBackend) {
         })
         .await
         .unwrap();
-    assert_eq!((report.files_indexed, embedded.into_inner()), (0, left));
+    assert_eq!((report.files_indexed, embedded.into_inner(), report.vectors_added), (0, left, left));
     assert_eq!(counts(&index).await, (files, chunks, 0, true), "nothing lost or duplicated");
     let reader = Index::open(&ws, embedder(true), Access::ReadOnly).await.unwrap();
     let found = reader.search(&query("item 217 total")).await.unwrap();

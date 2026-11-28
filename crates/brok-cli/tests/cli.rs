@@ -49,6 +49,57 @@ fn status_json_in_a_workspace() {
     assert!(status["index"].is_array());
     assert!(status["shards"].is_array());
     assert!(status["root"].as_str().is_some_and(|root| !root.is_empty()));
+    let readiness = &status["readiness"];
+    assert_eq!(readiness["text_search"]["state"], "not_indexed", "{readiness}");
+    assert_eq!(readiness["meaning_search"]["state"], "disabled");
+    assert_eq!(readiness["agent"]["state"], "not_installed");
+    assert_eq!(readiness["next_action"]["code"], "index_workspace");
+    assert_eq!(readiness["next_action"]["command"], "brok index");
+
+    assert!(brok(dir.path(), &["index"]).status.success());
+    let after = json(&brok(dir.path(), &["status", "--json"]));
+    assert_eq!(after["readiness"]["text_search"]["state"], "ready", "{after}");
+    assert_eq!(after["readiness"]["next_action"]["code"], "install_agent");
+}
+
+/// Overwrites the chunk data of either store: Arrow generations, or the
+/// versions of a LanceDB table.
+fn damage(dir: &Path) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            damage(&path);
+        } else if path.extension().is_some_and(|e| e == "arrow") || dir.ends_with("_versions") {
+            std::fs::write(path, "not an index").unwrap();
+        }
+    }
+}
+
+#[test]
+fn text_only_search_does_not_ask_to_enable_what_is_enabled() {
+    let dir = tempfile::tempdir().unwrap();
+    workspace_with(dir.path(), "billing.rs", "fn compute_invoice_total() {}\n");
+    // Enabled, as after an interrupted run, but without vectors. `init`
+    // turns them off in builds that cannot compute them.
+    let config = dir.path().join(".brokspace/brok.yml");
+    let yaml = std::fs::read_to_string(&config).unwrap();
+    let (before, embeddings) = yaml.split_once("embeddings:").expect("an embeddings section");
+    let embeddings = embeddings.replacen("enabled: false", "enabled: true", 1);
+    std::fs::write(&config, format!("{before}embeddings:{embeddings}")).unwrap();
+    let output = brok(dir.path(), &["search", "invoice total"]);
+    let said = [output.stdout, output.stderr].concat();
+    let said = String::from_utf8_lossy(&said);
+    assert!(said.contains("search by meaning is not ready yet"), "{said}");
+}
+
+#[test]
+fn status_reports_an_index_it_cannot_read() {
+    let dir = tempfile::tempdir().unwrap();
+    workspace_with(dir.path(), "main.rs", "fn main() {}\n");
+    damage(&dir.path().join(".brokspace/databases/cold"));
+    let status = json(&brok(dir.path(), &["status", "--json"]));
+    assert_eq!(status["readiness"]["text_search"]["state"], "unreadable", "{status}");
+    assert_eq!(status["readiness"]["next_action"]["command"], "brok index --rebuild");
 }
 
 fn workspace_with(dir: &Path, file: &str, body: &str) {
@@ -379,6 +430,19 @@ fn a_search_right_after_start_is_answered() {
     let _stop = Stop(dir.path());
     let started = brok(dir.path(), &["start"]);
     assert!(started.status.success(), "{}", String::from_utf8_lossy(&started.stderr));
+    let found = json(&brok(dir.path(), &["search", "--json", "invoice total"]));
+    assert_eq!(found["hits"][0]["path"], "billing.rs", "{found}");
+}
+
+#[test]
+fn rebuild_repairs_an_index_that_cannot_be_read() {
+    let dir = tempfile::tempdir().unwrap();
+    workspace_with(dir.path(), "billing.rs", "fn compute_invoice_total() { /* invoice total */ }\n");
+    damage(&dir.path().join(".brokspace/databases/cold"));
+    assert!(!brok(dir.path(), &["search", "--json", "invoice total"]).status.success(), "damaged");
+
+    let rebuilt = brok(dir.path(), &["index", "--rebuild"]);
+    assert!(rebuilt.status.success(), "{}", String::from_utf8_lossy(&rebuilt.stderr));
     let found = json(&brok(dir.path(), &["search", "--json", "invoice total"]));
     assert_eq!(found["hits"][0]["path"], "billing.rs", "{found}");
 }
