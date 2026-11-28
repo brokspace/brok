@@ -12,6 +12,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `brok index --rebuild`, the fix `brok doctor` suggests for an index it cannot read, now works on one: it failed while opening the damaged data.
 - `brok status --json` reports an index it cannot read, with `brok index --rebuild` as the next step, instead of failing (brokspace/brok#201).
 
 ## [0.12.0] - 2026-11-27

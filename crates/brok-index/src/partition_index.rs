@@ -80,6 +80,13 @@ pub struct PartitionIndex {
 }
 
 impl PartitionIndex {
+    /// Removes what is stored for the partition, without reading it.
+    pub(crate) fn discard(paths: &WorkspacePaths, partition: &Partition, backend: StoreBackend) -> Result<()> {
+        // A build that cannot write this store must not remove it.
+        resolve_backend(backend)?;
+        wipe(&partition.database_dir(paths))
+    }
+
     /// Opens the partition. In write mode, an index built with other
     /// settings (backend, embedding model or dimensions) is discarded so it
     /// can be rebuilt consistently.

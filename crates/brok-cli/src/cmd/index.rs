@@ -42,7 +42,8 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
 pub async fn index_workspace(workspace: &Workspace, rebuild: bool, progress: bool) -> Result<(IndexReport, bool)> {
     let embedder = brok_index::load_embedder(&workspace.config().embeddings, &workspace.paths().models)
         .context("cannot index with embeddings enabled")?;
-    let mut index = Index::open(workspace, embedder, Access::ReadWrite).await?;
+    let access = if rebuild { Access::Rebuild } else { Access::ReadWrite };
+    let mut index = Index::open(workspace, embedder, access).await?;
 
     let bar: Mutex<Option<ProgressBar>> = Mutex::new(progress.then(|| ui::spinner("Scanning workspace")));
     let on_progress = |event: Progress| {
