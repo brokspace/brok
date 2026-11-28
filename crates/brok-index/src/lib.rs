@@ -18,6 +18,7 @@ mod index;
 pub mod language;
 mod links;
 mod memory;
+mod os;
 pub mod partition_index;
 pub mod schema;
 mod search;
@@ -27,7 +28,7 @@ pub mod store;
 mod vault;
 
 pub use embed::{EmbedKind, Embedder, ModelFiles, load_embedder};
-pub use index::{Access, Index, IndexReport, PartitionStatus, Progress};
+pub use index::{Access, Index, IndexReport, PartitionStatus, Progress, VectorBatch, VectorJob};
 pub use links::LinkStatus;
 pub use memory::search_memories;
 pub use search::SearchQuery;

@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.11.0"
+version = "0.12.0"
 edition = "2024"
 rust-version = "1.89"
 license = "MIT OR Apache-2.0"
@@ -16,11 +16,11 @@ authors = ["Brokspace contributors"]
 # crates.io; for polyrepo development `scripts/bootstrap` patches it to the
 # sibling checkout (see CONTRIBUTING.md).
 brok-sdk = "0.3.1"
-brok-core = { version = "0.11.0", path = "crates/brok-core" }
-brok-bus = { version = "0.11.0", path = "crates/brok-bus" }
-brok-index = { version = "0.11.0", path = "crates/brok-index", default-features = false }
-brok-shard = { version = "0.11.0", path = "crates/brok-shard" }
-brok-skills = { version = "0.11.0", path = "crates/brok-skills" }
+brok-core = { version = "0.12.0", path = "crates/brok-core" }
+brok-bus = { version = "0.12.0", path = "crates/brok-bus" }
+brok-index = { version = "0.12.0", path = "crates/brok-index", default-features = false }
+brok-shard = { version = "0.12.0", path = "crates/brok-shard" }
+brok-skills = { version = "0.12.0", path = "crates/brok-skills" }
 
 # Async runtime & plumbing
 tokio = { version = "1.47", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
@@ -55,6 +55,7 @@ regex = { version = "1.11", default-features = false, features = ["std", "perf",
 ignore = "0.4"
 rayon = "1.11"
 memmap2 = "0.9"
+libc = "0.2"
 tempfile = "3.20"
 dirs = "7"
 clap_complete = "4.5"
@@ -66,6 +67,7 @@ arrow-array = "58"
 arrow-buffer = "58"
 arrow-ipc = "58"
 arrow-schema = "58"
+chrono = { version = "0.4", default-features = false }
 half = "2.7"
 # `remote` is required only because lancedb 0.40 references `Error::Http`
 # outside its feature gate (src/job.rs); drop it once fixed upstream.

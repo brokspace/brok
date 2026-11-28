@@ -28,17 +28,19 @@ use arrow_ipc::root_as_footer;
 use arrow_ipc::writer::FileWriter;
 
 use crate::chunk::Chunk;
-use crate::schema::{ChunkColumns, Precision, chunk_schema, schema_dims, schema_precision, to_record_batch};
+use crate::schema::{ChunkColumns, VectorFormat, chunk_schema, schema_dims, schema_format, to_record_batch};
 
 pub(crate) const CURRENT: &str = "CURRENT";
 /// Batches are coalesced on commit once there are more than this many.
 const MAX_BATCHES: usize = 8;
+/// Generations a reader tries before giving up on a very busy writer.
+const READ_ATTEMPTS: usize = 100;
 
 /// See the module documentation.
 pub struct ArrowStore {
     dir: PathBuf,
     dims: Option<usize>,
-    precision: Precision,
+    format: VectorFormat,
     generation: u64,
     batches: Vec<RecordBatch>,
     ids: HashMap<String, (usize, usize)>,
@@ -50,16 +52,14 @@ impl ArrowStore {
     /// Opens the live generation in `dir`, creating the directory if needed.
     pub fn open(dir: &Path, dims: Option<usize>) -> Result<Self> {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-        let generation =
-            std::fs::read_to_string(dir.join(CURRENT)).ok().and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
-        let batches = if generation == 0 { Vec::new() } else { read_ipc(&generation_path(dir, generation))? };
+        let (generation, batches) = read_live(dir, read_ipc)?;
         // Existing data keeps its own layout; `dims` only applies to new stores.
         let dims = batches.first().map_or(dims, |first| schema_dims(&first.schema()));
-        let precision = batches.first().and_then(|first| schema_precision(&first.schema())).unwrap_or_default();
+        let format = batches.first().and_then(|first| schema_format(&first.schema())).unwrap_or_default();
         let mut store = Self {
             dir: dir.to_path_buf(),
             dims,
-            precision,
+            format,
             generation,
             batches,
             ids: HashMap::new(),
@@ -74,15 +74,15 @@ impl ArrowStore {
         self.dims
     }
 
-    /// Makes an empty store write vectors of another type, as old ones did.
+    /// Makes an empty store write another format, as older versions did.
     #[cfg(test)]
-    pub(crate) fn set_precision(&mut self, precision: Precision) {
-        assert!(self.batches.is_empty(), "the store already has a type");
-        self.precision = precision;
+    pub(crate) fn set_format(&mut self, format: VectorFormat) {
+        assert!(self.batches.is_empty(), "the store already has a format");
+        self.format = format;
     }
 
-    pub(crate) fn precision(&self) -> Precision {
-        self.precision
+    pub(crate) fn format(&self) -> VectorFormat {
+        self.format
     }
 
     pub(crate) fn count(&self) -> usize {
@@ -94,7 +94,7 @@ impl ArrowStore {
     }
 
     pub(crate) fn append(&mut self, chunks: &[Chunk], vectors: Option<&[Vec<f32>]>) -> Result<()> {
-        self.pending_appends.push(to_record_batch(chunks, vectors, self.dims, self.precision)?);
+        self.pending_appends.push(to_record_batch(chunks, vectors, self.dims, self.format)?);
         Ok(())
     }
 
@@ -115,12 +115,12 @@ impl ArrowStore {
         }
         next.append(&mut self.pending_appends);
         if next.len() > MAX_BATCHES {
-            let schema = chunk_schema(self.dims, self.precision);
+            let schema = chunk_schema(self.dims, self.format);
             next = vec![arrow_select::concat::concat_batches(&schema, &next)?];
         }
 
         let generation = self.generation + 1;
-        write_ipc(&generation_path(&self.dir, generation), &chunk_schema(self.dims, self.precision), &next)?;
+        write_ipc(&generation_path(&self.dir, generation), &chunk_schema(self.dims, self.format), &next)?;
         brok_core::fsutil::write_atomic(&self.dir.join(CURRENT), generation.to_string().as_bytes())?;
 
         // Release the old mapping before reopening, then garbage collect.
@@ -212,6 +212,36 @@ fn write_ipc(path: &Path, schema: &arrow_schema::Schema, batches: &[RecordBatch]
 }
 
 /// Maps an IPC file and decodes its batches without copying.
+/// The generation `CURRENT` names, 0 before the first commit.
+fn current_generation(dir: &Path) -> u64 {
+    std::fs::read_to_string(dir.join(CURRENT)).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0)
+}
+
+/// Reads the live generation with `read`. A writer removes a generation as
+/// soon as it has replaced it, possibly between reading `CURRENT` and opening
+/// the file: then the newer one is read.
+fn read_live(dir: &Path, mut read: impl FnMut(&Path) -> Result<Vec<RecordBatch>>) -> Result<(u64, Vec<RecordBatch>)> {
+    let mut generation = current_generation(dir);
+    let mut attempts = 1;
+    loop {
+        if generation == 0 {
+            return Ok((generation, Vec::new()));
+        }
+        match read(&generation_path(dir, generation)) {
+            Ok(batches) => return Ok((generation, batches)),
+            Err(e) => {
+                let newer = current_generation(dir);
+                // Unchanged: the live file itself cannot be read.
+                if newer == generation || attempts == READ_ATTEMPTS {
+                    return Err(e);
+                }
+                generation = newer;
+                attempts += 1;
+            }
+        }
+    }
+}
+
 fn read_ipc(path: &Path) -> Result<Vec<RecordBatch>> {
     let file = File::open(path).with_context(|| format!("opening {}", path.display()))?;
     // SAFETY: generation files are written once, renamed into place and
@@ -248,7 +278,36 @@ fn read_ipc(path: &Path) -> Result<Vec<RecordBatch>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::Precision;
     use crate::schema::tests::sample;
+
+    #[test]
+    fn a_generation_replaced_while_opening_is_read_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = |n: u64| std::fs::write(dir.path().join(CURRENT), n.to_string()).unwrap();
+        live(1);
+        let mut tried = Vec::new();
+        let (generation, _) = read_live(dir.path(), |path| {
+            tried.push(path.to_path_buf());
+            if tried.len() == 1 {
+                live(2);
+                anyhow::bail!("removed by the writer");
+            }
+            Ok(Vec::new())
+        })
+        .unwrap();
+        assert_eq!(generation, 2);
+        assert_eq!(tried, [generation_path(dir.path(), 1), generation_path(dir.path(), 2)]);
+
+        // A live file that cannot be read stays an error, without retrying.
+        let mut reads = 0;
+        let broken = read_live(dir.path(), |_| {
+            reads += 1;
+            anyhow::bail!("damaged")
+        });
+        assert!(broken.is_err());
+        assert_eq!(reads, 1);
+    }
 
     #[test]
     fn commit_delete_and_reopen() {
@@ -288,20 +347,37 @@ mod tests {
         let mut store = ArrowStore::open(new.path(), Some(2)).unwrap();
         store.append(&chunks, Some(&vectors)).unwrap();
         store.commit().unwrap();
-        assert_eq!(ArrowStore::open(new.path(), Some(2)).unwrap().precision(), Precision::Half);
+        assert_eq!(ArrowStore::open(new.path(), Some(2)).unwrap().format(), VectorFormat::default());
 
         // An index written by an earlier brok.
         let old = tempfile::tempdir().unwrap();
-        let batch = to_record_batch(&chunks, Some(&vectors), Some(2), Precision::Single).unwrap();
+        let single = VectorFormat { precision: Precision::Single, optional: false };
+        let batch = to_record_batch(&chunks, Some(&vectors), Some(2), single).unwrap();
         write_ipc(&generation_path(old.path(), 1), &batch.schema(), std::slice::from_ref(&batch)).unwrap();
         std::fs::write(old.path().join(CURRENT), "1").unwrap();
         let mut store = ArrowStore::open(old.path(), Some(2)).unwrap();
-        assert_eq!(store.precision(), Precision::Single);
+        assert_eq!(store.format(), single);
         store.append(&[sample("c1", "c.rs")], Some(&[vec![0.6, 0.8]])).unwrap();
         store.commit().unwrap();
         let reopened = ArrowStore::open(old.path(), Some(2)).unwrap();
-        assert_eq!((reopened.precision(), reopened.count()), (Precision::Single, 3));
+        assert_eq!((reopened.format(), reopened.count()), (single, 3));
         assert_eq!(reopened.vector_search(&[0.6, 0.8], 1)[0].0, "c1");
+    }
+
+    #[test]
+    fn rows_waiting_for_vectors_are_kept_and_not_matched() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = ArrowStore::open(dir.path(), Some(2)).unwrap();
+        store.append(&[sample("a1", "a.rs"), sample("b1", "b.rs")], None).unwrap();
+        store.commit().unwrap();
+        let mut store = ArrowStore::open(dir.path(), Some(2)).unwrap();
+        assert_eq!(store.count(), 2);
+        assert!(store.vector_search(&[1.0, 0.0], 5).is_empty());
+        store.delete_paths(&["a.rs".to_string()]);
+        store.append(&[sample("a1", "a.rs")], Some(&[vec![1.0, 0.0]])).unwrap();
+        store.commit().unwrap();
+        let found = store.vector_search(&[1.0, 0.0], 5);
+        assert_eq!((store.count(), found.len(), found[0].0.as_str()), (2, 1, "a1"));
     }
 
     #[test]
