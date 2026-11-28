@@ -76,6 +76,23 @@ fn damage(dir: &Path) {
 }
 
 #[test]
+fn text_only_search_does_not_ask_to_enable_what_is_enabled() {
+    let dir = tempfile::tempdir().unwrap();
+    workspace_with(dir.path(), "billing.rs", "fn compute_invoice_total() {}\n");
+    // Enabled, as after an interrupted run, but without vectors. `init`
+    // turns them off in builds that cannot compute them.
+    let config = dir.path().join(".brokspace/brok.yml");
+    let yaml = std::fs::read_to_string(&config).unwrap();
+    let (before, embeddings) = yaml.split_once("embeddings:").expect("an embeddings section");
+    let embeddings = embeddings.replacen("enabled: false", "enabled: true", 1);
+    std::fs::write(&config, format!("{before}embeddings:{embeddings}")).unwrap();
+    let output = brok(dir.path(), &["search", "invoice total"]);
+    let said = [output.stdout, output.stderr].concat();
+    let said = String::from_utf8_lossy(&said);
+    assert!(said.contains("search by meaning is not ready yet"), "{said}");
+}
+
+#[test]
 fn status_reports_an_index_it_cannot_read() {
     let dir = tempfile::tempdir().unwrap();
     workspace_with(dir.path(), "main.rs", "fn main() {}\n");

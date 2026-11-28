@@ -12,6 +12,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `brok search` no longer says to enable embeddings when they are enabled and search by meaning is not ready yet.
 - `brok index` finishing an interrupted run says how many chunks got their vector, instead of only "Indexed 0 files (0 chunks)".
 - `brok index --rebuild`, the fix `brok doctor` suggests for an index it cannot read, now works on one: it failed while opening the damaged data.
 - `brok status --json` reports an index it cannot read, with `brok index --rebuild` as the next step, instead of failing (brokspace/brok#201).
