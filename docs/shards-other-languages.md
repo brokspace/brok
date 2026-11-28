@@ -88,7 +88,11 @@ UTF-8 JSON. A frame may arrive in pieces, and one read may hold several. The lim
    `{"query":"...","limit":5}`, and read `payload.hits` of the reply. To answer someone else's event,
    publish with its `id` as your `correlation_id`.
 
-6. When an event with topic `system:shutdown` arrives, or the connection closes, exit with code 0
+6. If you answer `agent:ask`: an event with topic `system:request.cancelled` and payload
+   `{"request": "<event id>"}` means the client asking has left. Stop working on that request,
+   including any model call. It arrives without a subscription.
+
+7. When an event with topic `system:shutdown` arrives, or the connection closes, exit with code 0
    within 3 seconds. Any other exit code counts as a crash, and brok restarts the shard.
 
 The payloads of the well-known topics are listed in
