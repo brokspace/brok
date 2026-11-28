@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `brok status --json` reports `readiness`: whether keyword and meaning search, the agent and the model are ready, with one suggested next action and a stable code for it, so editors need not read error text. Only a model server on this machine is contacted (brokspace/brok#201).
+
+### Fixed
+
+- `brok status --json` reports an index it cannot read, with `brok index --rebuild` as the next step, instead of failing (brokspace/brok#201).
+
 ## [0.12.0] - 2026-11-27
 
 ### Changed

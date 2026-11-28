@@ -49,6 +49,40 @@ fn status_json_in_a_workspace() {
     assert!(status["index"].is_array());
     assert!(status["shards"].is_array());
     assert!(status["root"].as_str().is_some_and(|root| !root.is_empty()));
+    let readiness = &status["readiness"];
+    assert_eq!(readiness["text_search"]["state"], "not_indexed", "{readiness}");
+    assert_eq!(readiness["meaning_search"]["state"], "disabled");
+    assert_eq!(readiness["agent"]["state"], "not_installed");
+    assert_eq!(readiness["next_action"]["code"], "index_workspace");
+    assert_eq!(readiness["next_action"]["command"], "brok index");
+
+    assert!(brok(dir.path(), &["index"]).status.success());
+    let after = json(&brok(dir.path(), &["status", "--json"]));
+    assert_eq!(after["readiness"]["text_search"]["state"], "ready", "{after}");
+    assert_eq!(after["readiness"]["next_action"]["code"], "install_agent");
+}
+
+/// Overwrites the chunk data of either store: Arrow generations, or the
+/// versions of a LanceDB table.
+fn damage(dir: &Path) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            damage(&path);
+        } else if path.extension().is_some_and(|e| e == "arrow") || dir.ends_with("_versions") {
+            std::fs::write(path, "not an index").unwrap();
+        }
+    }
+}
+
+#[test]
+fn status_reports_an_index_it_cannot_read() {
+    let dir = tempfile::tempdir().unwrap();
+    workspace_with(dir.path(), "main.rs", "fn main() {}\n");
+    damage(&dir.path().join(".brokspace/databases/cold"));
+    let status = json(&brok(dir.path(), &["status", "--json"]));
+    assert_eq!(status["readiness"]["text_search"]["state"], "unreadable", "{status}");
+    assert_eq!(status["readiness"]["next_action"]["command"], "brok index --rebuild");
 }
 
 fn workspace_with(dir: &Path, file: &str, body: &str) {
