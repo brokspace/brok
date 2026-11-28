@@ -111,7 +111,16 @@ pub async fn run(cwd: &Path, args: Args) -> Result<()> {
         println!();
     }
     if !results.semantic {
-        ui::hint("text (BM25) search only; enable embeddings for semantic results");
+        ui::hint(text_only_hint(workspace.config().embeddings.enabled));
     }
     Ok(())
+}
+
+/// Why the results were ranked by keywords alone.
+fn text_only_hint(embeddings_enabled: bool) -> &'static str {
+    if embeddings_enabled {
+        "text (BM25) search only: search by meaning is not ready yet (`brok doctor` says why)"
+    } else {
+        "text (BM25) search only; enable embeddings for semantic results"
+    }
 }

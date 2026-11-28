@@ -46,7 +46,7 @@ Changing indexing, search, the daemon or anything that costs CPU, memory or disk
 
 - Libraries return errors with context (`anyhow::Context`, `thiserror` for typed errors) and **never print**. Only `brok-cli` talks to the terminal (`crates/brok-cli/src/ui.rs`). Error messages tell the user what to do next.
 - No panics on user input. `unwrap`/`expect` only where an invariant guarantees it, and say why in the `expect` message.
-- `unsafe` is denied workspace-wide. The single exception (memory-mapping immutable Arrow files) carries a `SAFETY:` comment.
+- `unsafe` is denied workspace-wide. The exceptions (memory-mapping immutable Arrow files, returning freed memory with `malloc_trim` on Linux, and the inheritance of standard handles on Windows) each carry a `SAFETY:` comment. Adding one needs the same.
 - Cross-platform is first class (Linux, macOS, Windows). Stored paths are workspace relative with `/` separators. Mind named pipes, file locks and antivirus locks on Windows (`fsutil::move_dir`).
 - Public items have doc comments. Module docs explain the why.
 - Tests exercise behaviour through public interfaces with real I/O in temp dirs (see `crates/brok-index/tests/pipeline.rs`, `crates/brok-bus/tests/bus.rs`). No mocks of our own internals.
