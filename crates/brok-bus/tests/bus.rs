@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use brok_bus::{Bus, Grant};
 use brok_sdk::frame::{ErrorCode, ShardContext};
-use brok_sdk::payload::{AskChunk, AskRequest, FileChanged, Shutdown};
+use brok_sdk::payload::{AskChunk, AskDone, AskRequest, FileChanged, RequestCancelled, Shutdown};
 use brok_sdk::{BrokClient, ClientError, ConnectOptions, Event, Inbox, Topic, TopicPattern};
 use tokio_util::sync::CancellationToken;
 
@@ -117,6 +117,43 @@ async fn replies_only_reach_the_requester() {
     assert_eq!(reply.decode::<AskChunk>().unwrap().text, "because");
     assert_eq!(reply.source, "agent");
     assert!(tokio::time::timeout(Duration::from_millis(200), snoop_inbox.recv()).await.is_err());
+}
+
+fn ask() -> Event {
+    let ask = AskRequest { prompt: "why?".into(), provider: None, context_chunks: None, skill: None, history: vec![] };
+    Event::from_payload(&ask).unwrap()
+}
+
+#[tokio::test]
+async fn the_agent_is_told_when_the_one_asking_leaves() {
+    let h = Harness::start();
+    let (agent, mut agent_inbox) =
+        h.connect(Grant::service("agent", vec![p("agent:ask.*")], vec![p("agent:ask")])).await;
+    let (_bystander, mut bystander_inbox) = h.connect(Grant::service("bystander", vec![], vec![p("file:*")])).await;
+    agent.subscribe([p("agent:ask")]).await.unwrap();
+    barrier(&h).await;
+
+    // One question is answered before its client leaves, one is not.
+    let (answered, answered_inbox) = h.connect(Grant::operator(ShardContext::default())).await;
+    let mut replies = answered.request(ask()).await.unwrap();
+    let request = recv(&mut agent_inbox).await;
+    let done = AskDone { provider: "p".into(), model: "m".into(), sources: vec![] };
+    agent.reply(&request, &done).await.unwrap();
+    replies.next_timeout(WAIT).await.unwrap();
+    drop((replies, answered, answered_inbox));
+
+    let (cli, cli_inbox) = h.connect(Grant::operator(ShardContext::default())).await;
+    let mut replies = cli.request(ask()).await.unwrap();
+    let request = recv(&mut agent_inbox).await;
+    agent.reply(&request, &AskChunk { text: "be".into() }).await.unwrap();
+    replies.next_timeout(WAIT).await.unwrap();
+    drop((replies, cli, cli_inbox));
+
+    let event = recv(&mut agent_inbox).await;
+    assert_eq!(event.source, brok_bus::BUS_IDENTITY);
+    assert_eq!(event.decode::<RequestCancelled>().unwrap().request, request.id, "only the unanswered one");
+    assert!(tokio::time::timeout(Duration::from_millis(200), agent_inbox.recv()).await.is_err());
+    assert!(tokio::time::timeout(Duration::from_millis(200), bystander_inbox.recv()).await.is_err());
 }
 
 #[tokio::test]
